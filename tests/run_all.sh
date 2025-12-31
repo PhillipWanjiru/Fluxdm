@@ -2,7 +2,7 @@
 # FluxDM — tests/run_all.sh
 #
 # Runs every test suite of the C core, in order of increasing cost:
-#   1. unit tests        (errors, bandwidth, checksum, resume, URL / HTTP parsing, IPC framing)
+#   1. unit tests        (errors, bandwidth, checksum, resume, host gate, URL / HTTP parsing, IPC framing)
 #   2. integration smoke (a private fluxdm-core instance, the real IPC protocol)
 #   3. behaviour suite   (retries, pause/resume, HTTPS, crash recovery, concurrency, IPC abuse ...)
 #
@@ -45,11 +45,12 @@ run_step() {            # run_step "<title>" <command...>
     fi
 }
 
-if ! make -s unit unit-io; then
+if ! make -s unit unit-io unit-net; then
     echo -e "  ${RED}✘  could not build the unit tests${RESET}"; exit 1
 fi
 run_step "Unit tests"        ./test_unit
 run_step "Unit tests (URL / HTTP / IPC framing)" ./test_unit_io
+run_step "Unit tests (protocol layer, limiter)" ./test_unit_net
 
 if [[ $WITH_CORE -eq 1 ]]; then
     CORE_BIN="${FLUXDM_CORE:-$SCRIPT_DIR/../core/fluxdm-core}"

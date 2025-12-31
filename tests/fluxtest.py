@@ -619,6 +619,14 @@ class Site:
       redirect    (code, location) instead of the file
       status      (code, retry_after|None) instead of the file ...
       status_times ... for the first K requests only (default: always)
+      status_after ... skipping the first K requests (1 = let the probe through)
+      script      one entry per request to this path, in the order the requests arrive (the
+                  probe is #0): None = serve normally, (code, retry_after|None) = answer with
+                  that status, ("reset", N) = reset the connection after N body bytes. Requests
+                  past the end of the list are served normally.
+      max_active  serve at most N GETs at the same time; the rest get `limit_status`
+                  ((code, retry_after|None), default (429, None)) — a connection cap.
+                  The Site counts them: refused, peak_active.
       reset_after reset the connection after N body bytes ...
       reset_times ... on the first K matching requests (default 1)
       hold_after  stall the body after N bytes until site.release is set
@@ -628,15 +636,21 @@ class Site:
 
     DEFAULTS = dict(ranges=True, keepalive=False, head="ok", chunk=65536, delay=0.0,
                     chunked=False, no_length=False, auth=None, redirect=None, status=None,
-                    status_times=None, reset_after=None, reset_times=1, hold_after=None,
-                    etag=None, last_modified=True)
+                    status_times=None, status_after=0, reset_after=None, reset_times=1,
+                    hold_after=None, etag=None, last_modified=True,
+                    max_active=None, limit_status=(429, None), script=None)
 
     def __init__(self, root, tls=None, **defaults):
         self.root = Path(root)
         self.defaults = dict(self.DEFAULTS, **defaults)
         self.routes: dict[str, dict] = {}
-        self.log: list[tuple] = []                 # (method, path, range, status, bytes sent)
+        self.log: list[tuple] = []                 # (method, path, range, status, bytes sent, start time)
         self.status_done: dict[str, int] = {}
+        self.seen: dict[str, int] = {}             # requests per path while a `status` rule is set
+        self.script_pos: dict[str, int] = {}       # requests per path while a `script` is set
+        self.active_gets = 0                       # GETs being served right now (max_active)
+        self.peak_active = 0
+        self.refused = 0                           # GETs turned away by max_active
         self.conn_count = 0
         self.resets_done: dict[str, int] = {}
         self.release = threading.Event()
@@ -709,7 +723,8 @@ class Site:
                 order requests arrived in, and a snapshot of log_len() separates 'before'
                 from 'after' even for requests that are still being served."""
                 with site.lock:
-                    self._entry = [self.command, path, self.headers.get("Range"), "pending", 0]
+                    self._entry = [self.command, path, self.headers.get("Range"), "pending", 0,
+                                   time.monotonic()]
                     site.log.append(self._entry)
 
             def _record(self, status, sent=0):
@@ -736,7 +751,32 @@ class Site:
                 self._serve()
 
             def do_GET(self):
-                self._serve()
+                path = unquote(self.path.split("?")[0])
+                o = site.opts(path)
+                cap = o["max_active"]
+                if not cap:
+                    self._serve()
+                    return
+                with site.lock:                                  # a connection cap, like a real server's
+                    over = site.active_gets >= cap
+                    if over:
+                        site.refused += 1
+                    else:
+                        site.active_gets += 1
+                        site.peak_active = max(site.peak_active, site.active_gets)
+                if over:
+                    self._begin(path)
+                    code, retry_after = o["limit_status"]
+                    hdrs = [("Content-Length", "0")]
+                    if retry_after is not None:
+                        hdrs.append(("Retry-After", str(retry_after)))
+                    self._reply(code, hdrs, o)
+                    return
+                try:
+                    self._serve()
+                finally:
+                    with site.lock:
+                        site.active_gets -= 1
 
             def _serve(self):
                 path = unquote(self.path.split("?")[0])
@@ -754,10 +794,26 @@ class Site:
                     code, loc = o["redirect"]
                     self._reply(code, [("Location", loc), ("Content-Length", "0")], o)
                     return
+                step = None
+                if o["script"]:
+                    with site.lock:
+                        i = site.script_pos.get(path, 0)
+                        site.script_pos[path] = i + 1
+                    step = o["script"][i] if i < len(o["script"]) else None
+                    if step is not None and step[0] != "reset":
+                        code, retry_after = step
+                        hdrs = [("Content-Length", "0")]
+                        if retry_after is not None:
+                            hdrs.append(("Retry-After", str(retry_after)))
+                        self._reply(code, hdrs, o)
+                        return
+
                 if o["status"]:
                     with site.lock:
+                        seen = site.seen.get(path, 0)
+                        site.seen[path] = seen + 1
                         n = site.status_done.get(path, 0)
-                        active = o["status_times"] is None or n < o["status_times"]
+                        active = seen >= o["status_after"] and (o["status_times"] is None or n < o["status_times"])
                         if active:
                             site.status_done[path] = n + 1
                     if active:
@@ -839,6 +895,9 @@ class Site:
                     self.close_connection = True
 
                 reset_at = o["reset_after"]            # None = never
+                forced_reset = step is not None and step[0] == "reset"
+                if forced_reset:
+                    reset_at = step[1]
 
                 sent = 0
                 try:
@@ -853,8 +912,8 @@ class Site:
                             if reset_at is not None and sent + len(blk) > reset_at:
                                 with site.lock:
                                     n = site.resets_done.get(path, 0)
-                                    do_reset = n < o["reset_times"]
-                                    if do_reset:
+                                    do_reset = forced_reset or n < o["reset_times"]
+                                    if do_reset and not forced_reset:
                                         site.resets_done[path] = n + 1
                                 if do_reset:
                                     blk = blk[:max(0, reset_at - sent)]

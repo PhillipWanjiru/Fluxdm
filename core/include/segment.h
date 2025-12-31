@@ -17,6 +17,7 @@
 #pragma once
 
 #include "connection.h"
+#include "hostgate.h"
 #include "protocol/http.h"
 #include <stdint.h>
 #include <stddef.h>
@@ -77,6 +78,13 @@ typedef struct flux_segment {
     uint64_t     retry_at_ms;   /* when state == SEG_RETRYING           */
     uint64_t     progress_mark; /* `received` when retries was last reset */
 
+    /* Server pushback (HTTP 429 / 503). Not a fault of the connection, so it does
+     * not spend `retries`: the segment keeps asking, politely, within a time
+     * budget (see hostgate.h). `gate` is the slot its connection holds. */
+    flux_hostgate_t *gate;      /* NULL = no slot held                  */
+    uint64_t     refused_since_ms;  /* first refusal of the current run, 0 = none */
+    uint8_t      refusals;      /* refusals in the current run          */
+
     /* Timing (monotonic clock, ms) */
     uint64_t     started_at_ms;
     uint64_t     last_active_ms;
@@ -123,7 +131,9 @@ flux_segment_t *flux_seg_new(struct flux_download *dl, uint8_t index,
 
 /* Start (or restart) the segment: open a connection to the download's current
  * target and register it with `epoll_fd`. Returns 0 when the segment is under
- * way or a retry has been scheduled, -1 when it failed permanently. */
+ * way or a retry has been scheduled — including "the host cannot take another
+ * connection right now" (the segment then waits in SEG_RETRYING for a free
+ * slot) — and -1 when it failed permanently. */
 int  flux_seg_start(flux_segment_t *seg, int epoll_fd);
 
 /* Take over an already-connected socket whose response head has been parsed

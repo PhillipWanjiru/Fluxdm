@@ -6,7 +6,9 @@
  *  - Start: if a core is already serving the socket (the daemon was restarted
  *    while the core kept running, or someone started one by hand) it is adopted
  *    and downloads keep going without a hiccup. Otherwise one is spawned with
- *    --sock, so the daemon and the core can never disagree about the path.
+ *    --sock, so the daemon and the core can never disagree about the path; the
+ *    log level, the bandwidth cap and the rate-limit patience (how long the core
+ *    waits for a server that answers 429 / 503) come from application.properties.
  *    The socket file is never deleted from here: the core refuses a socket that
  *    a live process serves and replaces a stale one itself.
  *
@@ -50,12 +52,14 @@ public class IPCBridgeService {
     private static final long FIRST_RETRY_MS = 500;
     private static final long MAX_RETRY_MS   = 15_000;
     private static final long STABLE_MS      = 10_000;   /* connected this long = the last crash is forgiven */
+    private static final int  MAX_PATIENCE_S = 86_400;   /* the core's own upper bound for --patience */
 
     private final CoreIPCClient ipc;
     private final String        coreBinaryPath;
     private final int           logLevel;
     private final long          startupTimeoutMs;
     private final long          globalLimitBps;
+    private final int           patienceSeconds;
 
     private final Object connectLock = new Object();
 
@@ -72,12 +76,14 @@ public class IPCBridgeService {
                             @Value("${fluxdm.core.binary-path}") String coreBinaryPath,
                             @Value("${fluxdm.core.log-level:1}") int logLevel,
                             @Value("${fluxdm.core.startup-timeout-ms:5000}") long startupTimeoutMs,
-                            @Value("${fluxdm.core.global-limit-bps:0}") long globalLimitBps) {
+                            @Value("${fluxdm.core.global-limit-bps:0}") long globalLimitBps,
+                            @Value("${fluxdm.core.patience-seconds:300}") int patienceSeconds) {
         this.ipc              = ipc;
         this.coreBinaryPath   = coreBinaryPath;
         this.logLevel         = logLevel;
         this.startupTimeoutMs = startupTimeoutMs;
         this.globalLimitBps   = globalLimitBps;
+        this.patienceSeconds  = Math.max(0, Math.min(MAX_PATIENCE_S, patienceSeconds));   /* the core refuses to start on a value outside its range */
     }
 
     /* ── Startup ──────────────────────────────────────────────────────────── */
@@ -170,6 +176,8 @@ public class IPCBridgeService {
             cmd.add("--limit");
             cmd.add(String.valueOf(globalLimitBps));
         }
+        cmd.add("--patience");
+        cmd.add(String.valueOf(patienceSeconds));
 
         ProcessBuilder pb = new ProcessBuilder(cmd);
         pb.redirectOutput(ProcessBuilder.Redirect.DISCARD);

@@ -13,6 +13,13 @@
  *
  * Nothing here blocks: every call does what it can and returns, and flux_seg_tick()
  * plus the epoll events pick the work up again.
+ *
+ * Two kinds of "try again later" share SEG_RETRYING:
+ *   - a connection failed (network error, 5xx): seg_fail() backs off and spends
+ *     one of the segment's retries;
+ *   - the server pushed back (429 / 503), or the host's allowance of connections
+ *     is used up: the segment waits for a slot without spending retries, within
+ *     a time budget (seg_refused(), hostgate.h).
  */
 
 #include "../include/segment.h"
@@ -61,6 +68,14 @@ static void seg_close_conn(flux_segment_t *seg) {
         seg->conn = NULL;
     }
     seg->epoll_events = 0;
+    flux_gate_release(seg->gate);          /* the slot goes back whenever the connection does */
+    seg->gate = NULL;
+}
+
+/* The server is serving this segment again: forget its earlier refusals. */
+static void seg_clear_refusals(flux_segment_t *seg) {
+    seg->refused_since_ms = 0;
+    seg->refusals         = 0;
 }
 
 static void seg_release_wbuf(flux_segment_t *seg) {
@@ -183,6 +198,27 @@ static uint32_t backoff_ms(const flux_segment_t *seg) {
     return (uint32_t)((int64_t)ms + (int64_t)ms * j / 100);
 }
 
+/* The start of every failure: remember the cause (it must already be in the
+ * thread-local error store), keep the bytes we have — a retry resumes right after
+ * them — and drop the connection. Returns 1 when flushing hit a disk error,
+ * which outranks whatever went wrong on the network and ends the segment. */
+static int seg_abandon_attempt(flux_segment_t *seg) {
+    int disk_error = 0;
+
+    seg->err_code = flux_last_error();
+    snprintf(seg->err_msg, sizeof(seg->err_msg), "%s", flux_last_error_str());
+
+    if (seg->wbuf_len > 0 && flux_seg_flush(seg) < 0) {
+        seg->err_code = flux_last_error();
+        snprintf(seg->err_msg, sizeof(seg->err_msg), "%s", flux_last_error_str());
+        disk_error = 1;
+    }
+    seg_close_conn(seg);
+    seg->deadline_ms = 0;
+    seg->pump_again  = 0;
+    return disk_error;
+}
+
 /* Record a failure. The cause must already be in the thread-local error store
  * (flux_set_error). `fatal` ends the segment; otherwise it backs off and is
  * restarted by flux_seg_tick() — from the byte after the last one received.
@@ -190,23 +226,14 @@ static uint32_t backoff_ms(const flux_segment_t *seg) {
 static void seg_fail(flux_segment_t *seg, int fatal, uint32_t delay_ms) {
     uint64_t now = flux_now_ms();
 
-    seg->err_code = flux_last_error();
-    snprintf(seg->err_msg, sizeof(seg->err_msg), "%s", flux_last_error_str());
-
-    /* Keep what we already have: a retry resumes right after it. A disk error
-     * here outranks whatever went wrong on the network. */
-    if (seg->wbuf_len > 0 && flux_seg_flush(seg) < 0) {
-        seg->err_code = flux_last_error();
-        snprintf(seg->err_msg, sizeof(seg->err_msg), "%s", flux_last_error_str());
-        fatal = 1;
-    }
-    seg_close_conn(seg);
-    seg->deadline_ms = 0;
-    seg->pump_again  = 0;
+    if (seg_abandon_attempt(seg)) fatal = 1;
 
     if (!fatal) {
         uint64_t got = flux_seg_received(seg);
-        if (got >= seg->progress_mark + SEG_RETRY_RESET_BYTES) seg->retries = 0;  /* made real progress */
+        if (got >= seg->progress_mark + SEG_RETRY_RESET_BYTES) {   /* made real progress */
+            seg->retries = 0;
+            seg_clear_refusals(seg);
+        }
         seg->progress_mark = got;
 
         if (seg->retries >= seg->max_retries) {
@@ -232,6 +259,67 @@ static void seg_fail(flux_segment_t *seg, int fatal, uint32_t delay_ms) {
              seg->err_msg, (unsigned)seg->retries, (unsigned)delay);
 }
 
+/* The server answered 429 / 503: busy or rationing, not broken. That is no fault
+ * of the connection, so it does not spend the retry budget; the segment backs off
+ * (at least as long as the server asked), waits for a slot and asks again — for
+ * as long as the patience lasts, so a rate limit that clears in a minute does
+ * not kill a download. The gate hears of it too: the host's other segments, and
+ * other downloads to it, ease off instead of all being refused in step.
+ * The cause (the HTTP status) must already be in the thread-local error store. */
+static void seg_refused(flux_segment_t *seg, uint32_t retry_after_ms) {
+    uint64_t now     = flux_now_ms();
+    uint32_t lowered = flux_gate_throttled(seg->gate, now, retry_after_ms);   /* needs the slot: before it goes back */
+    int      fatal   = seg_abandon_attempt(seg);
+
+    if (lowered)
+        flux_log(1, "%s:%u is refusing connections (%s) — using at most %u at a time for now",
+                 seg->dl->target.host, (unsigned)seg->dl->target.port, seg->err_msg, (unsigned)lowered);
+
+    uint32_t patience = flux_gate_patience_ms();
+    uint64_t waited   = 0;
+    uint32_t delay    = 0;
+
+    if (!fatal) {
+        uint64_t got = flux_seg_received(seg);
+        if (got >= seg->progress_mark + SEG_RETRY_RESET_BYTES) {          /* made real progress since */
+            seg->retries = 0;
+            seg_clear_refusals(seg);
+        }
+        seg->progress_mark = got;
+
+        if (seg->refused_since_ms == 0) seg->refused_since_ms = now;
+        waited = now - seg->refused_since_ms;
+
+        size_t n = strlen(seg->err_msg);
+        if (waited >= patience) {
+            fatal = 1;
+            snprintf(seg->err_msg + n, sizeof(seg->err_msg) - n,
+                     " (the server kept refusing for %u s)", (unsigned)(waited / 1000u));
+        } else if (retry_after_ms > patience - waited) {
+            fatal = 1;
+            snprintf(seg->err_msg + n, sizeof(seg->err_msg) - n,
+                     " (the server asks us to wait %u s)", (unsigned)(retry_after_ms / 1000u));
+        } else {
+            delay = flux_gate_backoff_ms(seg->refusals, seg->index);
+            if (retry_after_ms > delay) delay = retry_after_ms;
+            if (delay > patience - waited) delay = (uint32_t)(patience - waited);
+        }
+    }
+
+    if (fatal) {
+        seg->state = SEG_ERROR;
+        flux_log(1, "download %u segment %u failed: %s", seg->dl->id, seg->index, seg->err_msg);
+        return;
+    }
+
+    if (seg->refusals < UINT8_MAX) seg->refusals++;
+    seg->retry_delay_ms = delay;
+    seg->retry_at_ms    = now + delay;
+    seg->state          = SEG_RETRYING;
+    flux_log(2, "download %u segment %u: %s — asking again in %u ms", seg->dl->id, seg->index,
+             seg->err_msg, (unsigned)delay);
+}
+
 /* ── Completion ───────────────────────────────────────────────────────────── */
 
 static void seg_finish(flux_segment_t *seg) {
@@ -243,6 +331,7 @@ static void seg_finish(flux_segment_t *seg) {
     seg->deadline_ms  = 0;
     seg->pump_again   = 0;
     seg->retries      = 0;
+    seg_clear_refusals(seg);
 }
 
 /* ── Starting ─────────────────────────────────────────────────────────────── */
@@ -273,6 +362,17 @@ int flux_seg_start(flux_segment_t *seg, int epoll_fd) {
     if (flux_seg_remaining(seg) == 0) { seg->state = SEG_COMPLETE; return 0; }
 
     if (!dl->accept_ranges && flux_seg_received(seg) > 0) seg_restart_from_zero(seg);
+
+    /* A slot for the connection — or wait for one. Waiting is not a failure and
+     * spends no retry: the host simply cannot take another connection yet (it has
+     * said no, or asked for a pause), and the gate says when to look again. */
+    uint32_t wait_ms = 0;
+    if (!flux_gate_acquire(dl->target.host, dl->target.port, now, &seg->gate, &wait_ms)) {
+        seg->retry_delay_ms = wait_ms;
+        seg->retry_at_ms    = now + wait_ms;
+        seg->state          = SEG_RETRYING;
+        return 0;
+    }
 
     if (!seg->wbuf) {
         seg->wbuf = malloc(FLUX_WRITE_BUF_CAP);
@@ -585,6 +685,12 @@ static void seg_headers_complete(flux_segment_t *seg) {
         return;
     }
 
+    if (http_status_is_pushback(st)) {            /* "slow down": see seg_refused() */
+        flux_set_error(http_status_to_flux_error(st), "HTTP %d %s", st, r->reason);
+        seg_refused(seg, r->retry_after_s * 1000u);
+        return;
+    }
+
     if (st >= 400 || st < 200) {
         flux_set_error(http_status_to_flux_error(st), "HTTP %d %s", st, r->reason);
         if (http_status_is_retryable(st)) {
@@ -646,6 +752,7 @@ static void seg_headers_complete(flux_segment_t *seg) {
     }
 
     dl->redirects    = 0;                         /* a real response ends any redirect chain */
+    seg_clear_refusals(seg);                      /* ...and the server's pushback */
     seg->state       = SEG_BODY;
     seg->deadline_ms = flux_now_ms() + FLUX_CONN_RECV_TOMS;
     seg_epoll(seg, EPOLLIN);
@@ -683,6 +790,8 @@ int flux_seg_adopt(flux_segment_t *seg, int epoll_fd, flux_conn_t *conn,
     seg->last_active_ms  = now;
     seg->speed_sample_ms = now;
     seg->last_flush_ms   = now;
+
+    flux_gate_hold(seg->dl->target.host, seg->dl->target.port, now, &seg->gate);
 
     if (!seg->wbuf) {
         seg->wbuf = malloc(FLUX_WRITE_BUF_CAP);

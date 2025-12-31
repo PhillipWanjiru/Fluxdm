@@ -37,7 +37,7 @@ INCLUDES="-I$ROOT/engine/include -I$ROOT/core/include -I$ROOT/ipc"
 
 # ── Compile C core ────────────────────────────────────────────────────────────
 info "Compiling C core"
-C_SRCS="errors bandwidth checksum resume connection segment downloader"
+C_SRCS="errors bandwidth checksum resume hostgate connection segment downloader"
 for f in $C_SRCS; do
     gcc $CFLAGS $INCLUDES -c "$ROOT/core/src/${f}.c" -o "$BUILD_DIR/core/${f}.o"
     echo "  CC  ${f}.c"

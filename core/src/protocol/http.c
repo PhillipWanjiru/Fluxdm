@@ -277,7 +277,7 @@ int http_url_resolve(const http_url_t *base, const char *location, http_url_t *o
     if (loc[0] == '/') {
         snprintf(merged, sizeof(merged), "%s", loc);
     } else if (loc[0] == '?') {
-        char *q = strchr(base->path, '?');
+        const char *q = strchr(base->path, '?');
         size_t plen = q ? (size_t)(q - base->path) : strlen(base->path);
         if (plen + strlen(loc) >= sizeof(merged)) return url_err("redirect location too long", loc);
         memcpy(merged, base->path, plen);
@@ -286,7 +286,7 @@ int http_url_resolve(const http_url_t *base, const char *location, http_url_t *o
     } else if (loc[0] == '#') {
         snprintf(merged, sizeof(merged), "%s", base->path);
     } else {
-        char *q = strchr(base->path, '?');
+        const char *q = strchr(base->path, '?');
         size_t plen = q ? (size_t)(q - base->path) : strlen(base->path);
         while (plen > 0 && base->path[plen - 1] != '/') plen--;     /* keep the directory */
         if (plen + strlen(loc) >= sizeof(merged)) return url_err("redirect location too long", loc);
@@ -585,4 +585,8 @@ flux_error_t http_status_to_flux_error(int status) {
 int http_status_is_retryable(int status) {
     return status == 408 || status == 425 || status == 429 ||
            status == 500 || status == 502 || status == 503 || status == 504;
+}
+
+int http_status_is_pushback(int status) {
+    return status == 429 || status == 503;
 }

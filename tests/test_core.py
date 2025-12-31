@@ -8,7 +8,8 @@ against scriptable local HTTP(S) servers.
 
 What is covered: sizes x segment counts, keep-alive / chunked / unknown-length /
 no-Range servers, redirects, Basic auth, HTTPS (local CA, hostname + IP checks),
-retries after resets, bandwidth limits, pause / resume (also while probing),
+retries after resets, servers that push back (429 / 503, connection caps, Retry-After),
+bandwidth limits, pause / resume (also while probing),
 cancel cleanup, checksums, resume after SIGKILL / SIGTERM / shutdown (including
 a changed remote file), duplicate detection, failure paths, concurrency, IPC
 robustness (garbage, oversized frames, slow readers, client limits), disk
@@ -383,6 +384,227 @@ def test_retry_policies():
     expect(time.time() - t0 < 30, f"...without waiting unreasonably long ({time.time() - t0:.1f}s)")
     site.stop()
     c.close()
+
+
+# ═══ Servers that push back ═══════════════════════════════════════════════════
+def _refusals(site, path):
+    return [r for r in site.requests(path, "GET") if r[3] in (429, 503)]
+
+
+def test_rate_limits():
+    info("Rate limits: HTTP 429 / 503 are waited out instead of failing the download")
+    c = CORE.connect()
+    mkfile("rl_cap.bin", 16 << 20)
+    mkfile("rl_slow.bin", 12 << 20)
+
+    # 1. A connection cap. The server serves 3 GETs at a time and answers the rest with 429, the
+    #    way Hetzner's speed-test servers did to 24 parallel segments. The gate learns the cap from
+    #    the refusals; the other segments wait for a slot instead of burning their retries.
+    #    The server is slow on purpose (~400 KB/s per connection, so a segment takes ~4 s): that is
+    #    what separates "wait for a slot" from "retry on a timer" — a segment that merely backs off
+    #    (1 s, 2 s, 4 s ...) runs into the full server again and again, and is refused 15+ times.
+    site = Site(SRV, max_active=3, chunk=16384, delay=0.04)
+    t0 = time.time()
+    dl, res, dest = fetch(c, site, "/rl_slow.bin", segments=8, timeout=120)
+    dt = time.time() - t0
+    verify("a server that takes 3 connections at a time still delivers 8 segments intact", c, dl, res, dest, "rl_slow.bin")
+    expect(site.peak_active <= 3, f"...it never saw more than its cap in flight ({site.peak_active})")
+    expect(1 <= site.refused <= 9, f"...with few refusals: segments wait for a slot, they do not hammer ({site.refused})")
+    expect(dt < 60, f"...in a sane time ({dt:.1f}s)")
+    site.stop()
+
+    # 2. 503 is the same story (nginx's limit_conn answers 503), and Retry-After is honoured.
+    site = Site(SRV, max_active=2, limit_status=(503, 1), chunk=32768, delay=0.01)
+    dl, res, dest = fetch(c, site, "/rl_cap.bin", segments=6, timeout=120)
+    verify("503 + Retry-After: 1 from a 2-connection server: the download still completes", c, dl, res, dest, "rl_cap.bin")
+    expect(site.refused >= 1, f"...and the server really did push back ({site.refused} refusals)")
+    site.stop()
+
+    # 3. Retry-After holds the whole host: after the first refusal no new request arrives until it is over.
+    site = Site(SRV, max_active=2, limit_status=(429, 2), chunk=32768, delay=0.01)
+    dl, res, dest = fetch(c, site, "/rl_cap.bin", segments=6, timeout=120)
+    verify("429 + Retry-After: 2: completes intact", c, dl, res, dest, "rl_cap.bin")
+    gets = site.requests("/rl_cap.bin", "GET")
+    refused_at = [r[5] for r in gets if r[3] == 429]
+    if expect(bool(refused_at), "...the server did refuse some requests"):
+        t_ref = min(refused_at)
+        later = sorted(r[5] for r in gets if r[5] > t_ref + 0.5)
+        expect(bool(later) and later[0] - t_ref >= 1.9,
+               "...and nobody asked again before the Retry-After had passed "
+               f"(next request {later[0] - t_ref:.2f}s after the first refusal)" if later else "...no later request?")
+    site.stop()
+
+    # 4. Several downloads from one capped server share what it allows.
+    mkfile("rl_a.bin", 6 << 20)
+    site = Site(SRV, max_active=3, chunk=32768, delay=0.01)
+    jobs = []
+    for _ in range(3):
+        dl, dest = nid(), outpath()
+        expect(c.start_ok(dl, site.url("/rl_a.bin"), dest, segments=4), "a download is started")
+        jobs.append((dl, dest))
+    for n, (dl, dest) in enumerate(jobs, 1):
+        verify(f"3 downloads x 4 segments from a 3-connection server: #{n} is intact", c, dl,
+               c.wait_terminal(dl, 120), dest, "rl_a.bin")
+    expect(site.peak_active <= 3 and site.refused <= 40,
+           f"...peak {site.peak_active} in flight, {site.refused} refusals in all")
+    site.stop()
+
+    # 5. A server that relents after a few refusals.
+    site = Site(SRV)
+    site.set("/rl_a.bin", status=(429, None), status_after=1, status_times=6)
+    t0 = time.time()
+    dl, res, dest = fetch(c, site, "/rl_a.bin", segments=4, timeout=120)
+    verify("the first 6 requests after the probe are refused, then the server relents: completes intact", c, dl, res, dest, "rl_a.bin")
+    expect(time.time() - t0 < 40, f"...in a sane time ({time.time() - t0:.1f}s)")
+    site.stop()
+
+    # 6. Retry-After is about the host, not about one segment: a second download that starts while
+    #    the pause is running keeps off the server until it is over (no request, not even a probe).
+    mkfile("rl_b.bin", 2 << 20)
+    site = Site(SRV, max_active=2, limit_status=(429, 3), chunk=16384, delay=0.04)
+    dl_a, dest_a = nid(), outpath()
+    expect(c.start_ok(dl_a, site.url("/rl_b.bin"), dest_a, segments=4), "download A is started")
+    t_end = time.time() + 15
+    while not _refusals(site, "/rl_b.bin") and time.time() < t_end:
+        time.sleep(0.02)
+    first = _refusals(site, "/rl_b.bin")
+    if expect(bool(first), "...and the 2-connection server pushes back (429, Retry-After: 3)"):
+        t_ref = min(r[5] for r in first)
+        time.sleep(max(0.0, t_ref + 1.0 - time.monotonic()))
+        dl_b, dest_b = nid(), outpath()
+        expect(c.start_ok(dl_b, site.url("/rl_b.bin"), dest_b, segments=2), "download B is started one second into the pause")
+        for name, d, dest in (("A", dl_a, dest_a), ("B", dl_b, dest_b)):
+            verify(f"download {name} completes intact", c, d, c.wait_terminal(d, 120), dest, "rl_b.bin")
+        later = sorted(r[5] for r in site.requests("/rl_b.bin", "GET") if r[5] > t_ref + 0.5)
+        expect(bool(later) and later[0] - t_ref >= 2.9,
+               "...and nothing reached the server while the host was paused "
+               f"(next request {later[0] - t_ref:.2f}s after the first refusal)" if later else "...no later request?")
+    else:
+        c.cancel(dl_a)
+    site.stop()
+
+    # 7. Control stays prompt while every segment is waiting out a long Retry-After.
+    site = Site(SRV)
+    site.set("/rl_a.bin", status=(429, 30), status_after=1)
+    dl, dest = nid(), outpath()
+    expect(c.start_ok(dl, site.url("/rl_a.bin"), dest, segments=4), "START acknowledged")
+    time.sleep(1.5)
+    t0 = time.time()
+    r = c.pause(dl)
+    expect(r is True and time.time() - t0 < 4, f"PAUSE while all segments wait out Retry-After: 30 is prompt ({time.time() - t0:.1f}s)", r)
+    st = c.status(dl)
+    expect(isinstance(st, dict) and st["status"] == ST["PAUSED"], "...and the download is PAUSED", st)
+    expect(c.cancel(dl) is True, "CANCEL cleans up")
+    expect(not dest.exists() and not Path(str(dest) + ".fluxpart").exists(), "...leaving no files behind")
+    expect(CORE.alive(), "core alive")
+    site.stop()
+    clean_conn("connection clean", c)
+    c.close()
+
+
+def test_rate_limit_patience():
+    info("Rate limits: how long a download waits for a server that keeps refusing (--patience)")
+    mkfile("rl_never.bin", 4 << 20)
+
+    # The core's own switch: bad values are refused up front.
+    core = Core()
+    for bad in ("abc", "-1", "86401", ""):
+        r = subprocess.run([core.binary, "--patience", bad], capture_output=True, timeout=10)
+        expect(r.returncode == 2 and b"patience" in r.stderr, f"--patience {bad!r} is rejected (exit code {r.returncode})")
+    shutil.rmtree(core.dir, ignore_errors=True)
+
+    core = fresh_core(args=["--patience", "3"])
+    c = core.connect()
+    try:
+        # 1. every segment refused, the probe let through: gives up after the patience, not after N retries
+        site = Site(SRV)
+        site.set("/rl_never.bin", status=(429, None), status_after=1)
+        t0 = time.time()
+        dl, res, dest = fetch(c, site, "/rl_never.bin", segments=4, timeout=60)
+        dt = time.time() - t0
+        ok_ = bool(res) and res[0] == "error" and res[1]["code"] == ERR["SERVER"]
+        expect(ok_, "a server that never stops refusing: the download fails with a SERVER error", res)
+        msg = res[1]["msg"] if ok_ else ""
+        expect("429" in msg and "kept refusing" in msg and "gave up after" not in msg, f"...and says why ({msg!r})")
+        expect(2.5 <= dt <= 15, f"...after about the patience, not after a retry count ({dt:.1f}s)")
+        n = len(_refusals(site, "/rl_never.bin"))
+        expect(n <= 14, f"...having asked a bounded number of times ({n} refusals for 4 segments)")
+        expect(c.cancel(dl) is True and not dest.exists(), "...CANCEL clears it and no file is left")
+        site.stop()
+
+        # 2. the probe itself is refused
+        site = Site(SRV)
+        site.set("/rl_never.bin", status=(503, None))
+        t0 = time.time()
+        dl, res, dest = fetch(c, site, "/rl_never.bin", segments=4, timeout=60)
+        dt = time.time() - t0
+        ok_ = bool(res) and res[0] == "error" and res[1]["code"] == ERR["SERVER"]
+        expect(ok_ and "503" in res[1]["msg"] and "kept refusing" in res[1]["msg"],
+               "a server that refuses even the probe: SERVER error that says so", res)
+        expect(2.5 <= dt <= 12, f"...after about the patience ({dt:.1f}s)")
+        n = len(site.requests("/rl_never.bin"))
+        expect(2 <= n <= 5, f"...with a few polite attempts, not a hammering ({n} requests)")
+        c.cancel(dl)
+        site.stop()
+
+        # 3. a Retry-After beyond the patience is not waited for
+        for label, rule in (("the probe", dict(status=(429, 120))),
+                            ("a segment", dict(status=(429, 120), status_after=1))):
+            site = Site(SRV)
+            site.set("/rl_never.bin", **rule)
+            t0 = time.time()
+            dl, res, dest = fetch(c, site, "/rl_never.bin", segments=4, timeout=60)
+            dt = time.time() - t0
+            ok_ = bool(res) and res[0] == "error" and res[1]["code"] == ERR["SERVER"]
+            expect(ok_, f"Retry-After: 120 on {label}, patience 3 s: fails at once instead of waiting", res)
+            expect(dt < 3, f"...promptly ({dt:.1f}s)")
+            if ok_ and label == "a segment":
+                expect("asks us to wait 120 s" in res[1]["msg"], f"...and tells the user what the server asked ({res[1]['msg']!r})")
+            c.cancel(dl)
+            site.stop()
+        clean_conn("connection clean", c)
+    finally:
+        c.close()
+        expect(core.stop() == 0, "core exits cleanly")
+        shutil.rmtree(core.dir, ignore_errors=True)
+
+    # The patience is counted per run of refusals: once the server serves us again the clock starts
+    # over. Two runs of ~3 s each, with a response between them, are not 6 s of refusing.
+    # (One segment, so the requests arrive in a known order; the script is indexed by request:
+    #  #0 probe, #1 and #2 refused, #3 answered but reset after 1 KiB, #4 and #5 refused, then normal.)
+    core = fresh_core(args=["--patience", "4"])
+    c = core.connect()
+    try:
+        site = Site(SRV)
+        site.set("/rl_never.bin", script=[None, (429, None), (429, None), ("reset", 1024), (429, None), (429, None)])
+        t0 = time.time()
+        dl, res, dest = fetch(c, site, "/rl_never.bin", segments=1, timeout=60)
+        dt = time.time() - t0
+        verify("two runs of refusals with a response between them: each gets its own patience (4 s)", c, dl, res, dest, "rl_never.bin")
+        expect(len(_refusals(site, "/rl_never.bin")) == 4, f"...the server refused 4 times in all ({len(_refusals(site, '/rl_never.bin'))})")
+        expect(dt > 5.0, f"...so the whole wait was longer than the patience ({dt:.1f}s)")
+        site.stop()
+    finally:
+        c.close()
+        expect(core.stop() == 0, "core exits cleanly")
+        shutil.rmtree(core.dir, ignore_errors=True)
+
+    # --patience 0: the first refusal ends it
+    core = fresh_core(args=["--patience", "0"])
+    c = core.connect()
+    try:
+        site = Site(SRV)
+        site.set("/rl_never.bin", status=(429, None))
+        t0 = time.time()
+        dl, res, dest = fetch(c, site, "/rl_never.bin", segments=4, timeout=30)
+        expect(bool(res) and res[0] == "error" and time.time() - t0 < 3 and len(site.requests("/rl_never.bin")) == 1,
+               f"--patience 0: the first refusal is final (one request, {time.time() - t0:.1f}s)", res)
+        c.cancel(dl)
+        site.stop()
+    finally:
+        c.close()
+        expect(core.stop() == 0, "core exits cleanly")
+        shutil.rmtree(core.dir, ignore_errors=True)
 
 
 def test_disk_errors():
@@ -1106,7 +1328,8 @@ def test_throughput():
 # ═══ Main ═════════════════════════════════════════════════════════════════════
 TESTS = [
     test_sizes_and_segments, test_empty_file, test_server_flavours, test_url_forms, test_redirects,
-    test_basic_auth, test_checksums, test_failure_paths, test_retry_policies, test_disk_errors,
+    test_basic_auth, test_checksums, test_failure_paths, test_retry_policies, test_rate_limits,
+    test_rate_limit_patience, test_disk_errors,
     test_pause_resume, test_pause_resume_storm, test_cancel_cleanup, test_interruptible_probe,
     test_bandwidth_limits, test_duplicates_and_ids, test_resume_after_shutdown, test_resume_after_sigterm,
     test_resume_after_sigkill, test_resume_validation, test_second_instance, test_concurrent_downloads,

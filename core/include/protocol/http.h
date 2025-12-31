@@ -112,3 +112,8 @@ flux_error_t http_status_to_flux_error(int status);
 
 /* 1 for statuses worth retrying with back-off (408, 425, 429, 500, 502-504). */
 int  http_status_is_retryable(int status);
+
+/* 1 for the statuses by which a server asks to be given a rest (429, 503): not
+ * a fault of the request, so they are waited out rather than counted as
+ * failures — see hostgate.h. */
+int  http_status_is_pushback(int status);

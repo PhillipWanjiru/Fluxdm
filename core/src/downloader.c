@@ -28,6 +28,7 @@
 
 #include "../include/downloader.h"
 #include "../include/errors.h"
+#include "../include/hostgate.h"
 #include "../include/util.h"
 #include "../include/protocol/http.h"
 #include "../include/protocol/https.h"
@@ -611,13 +612,46 @@ static int probe_attempt(flux_download_t *dl, const http_url_t *u, int ranged, p
     return PR_OK;
 }
 
-/* A probe attempt with retries for transient failures (network errors, 429/5xx).
- * PR_OK means "we have a response" — the caller judges the status. */
+/* A probe attempt with retries. Transient failures (network errors, 408/425/5xx)
+ * get PROBE_ATTEMPTS tries. A server that answers 429 / 503 is busy, not broken:
+ * it is waited for — as long as the patience lasts, and the host's gate hears of
+ * it so the segments that follow do not pile on. PR_OK means "we have a
+ * response" — the caller judges the status. */
 static int probe_fetch(flux_download_t *dl, const http_url_t *u, int ranged, probe_t *p) {
-    unsigned delay = PROBE_BACKOFF_MS;
+    unsigned delay         = PROBE_BACKOFF_MS;
+    uint64_t refused_since = 0;
+    unsigned refusals      = 0;
 
     for (int attempt = 1; ; attempt++) {
+        /* Another download may have been told to leave this host alone for a while. */
+        uint32_t pause = flux_gate_pause_ms(u->host, u->port, flux_now_ms());
+        if (pause > flux_gate_patience_ms()) pause = flux_gate_patience_ms();
+        if (pause > 0 && wait_io(dl, -1, 0, flux_now_ms() + pause) < 0) return PR_INTERRUPTED;
+
         int rc = probe_attempt(dl, u, ranged, p);
+
+        if (rc == PR_OK && http_status_is_pushback(p->resp.status)) {
+            uint64_t now      = flux_now_ms();
+            uint32_t after_ms = p->resp.retry_after_s * 1000u;
+            uint32_t lowered  = flux_gate_note_refusal(u->host, u->port, now, after_ms);
+            if (lowered)
+                flux_log(1, "%s:%u is refusing connections (HTTP %d) — using at most %u at a time for now",
+                         u->host, (unsigned)u->port, p->resp.status, (unsigned)lowered);
+
+            if (refused_since == 0) refused_since = now;
+            uint64_t waited   = now - refused_since;
+            uint32_t patience = flux_gate_patience_ms();
+            if (waited >= patience || after_ms > patience - waited) return PR_OK;   /* out of patience: the caller reports the status */
+
+            uint32_t wait = flux_gate_backoff_ms(refusals++, dl->id);
+            if (after_ms > wait) wait = after_ms;
+            if (wait > patience - waited) wait = (uint32_t)(patience - waited);
+            flux_log(2, "download %u: probe got HTTP %d, asking again in %u ms", dl->id, p->resp.status, wait);
+            probe_close(p);
+            if (wait_io(dl, -1, 0, flux_now_ms() + wait) < 0) return PR_INTERRUPTED;
+            attempt--;                          /* pushback does not use up the attempts kept for real failures */
+            continue;
+        }
 
         if (rc == PR_OK) {
             if (!http_status_is_retryable(p->resp.status) || attempt >= PROBE_ATTEMPTS) return PR_OK;
@@ -709,7 +743,10 @@ static int dl_probe(flux_download_t *dl) {
 
     if (st != 200 && st != 206) {
         flux_error_t code = (st < 200 || st >= 300) ? http_status_to_flux_error(st) : FLUX_ERR_HTTP_STATUS;
-        flux_set_error(code, "HTTP %d %s", st, r->reason);
+        if (http_status_is_pushback(st))
+            flux_set_error(code, "HTTP %d %s (the server kept refusing; try again later)", st, r->reason);
+        else
+            flux_set_error(code, "HTTP %d %s", st, r->reason);
         probe_close(&p);
         return PROBE_FAILED;
     }

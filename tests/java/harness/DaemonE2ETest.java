@@ -289,7 +289,7 @@ public class DaemonE2ETest {
             this.queue = new QueueService(max);
             this.svc   = new DownloadService(repo, ipc, queue, ui, true);
             this.bw    = new BandwidthService(ipc, globalLimit);
-            this.bridge = new IPCBridgeService(ipc, coreBin.toString(), CORE_LOG, 8000, globalLimit);
+            this.bridge = new IPCBridgeService(ipc, coreBin.toString(), CORE_LOG, 8000, globalLimit, 300);
             if (bridgeFirst) {
                 bridge.startup();
                 ipc.addListener(svc);
@@ -823,21 +823,21 @@ public class DaemonE2ETest {
         T.section("Starting and stopping the core");
 
         /* Things that must fail loudly instead of leaving a daemon that looks fine. */
-        IPCBridgeService missing = new IPCBridgeService(new CoreIPCClient(freshSock().toString()), root.resolve("nope/fluxdm-core").toString(), 0, 1000, 0);
+        IPCBridgeService missing = new IPCBridgeService(new CoreIPCClient(freshSock().toString()), root.resolve("nope/fluxdm-core").toString(), 0, 1000, 0, 300);
         Throwable t1 = thrown(missing::startup);
         T.ok(t1 instanceof IllegalStateException && String.valueOf(t1.getCause()).contains("not found"), "a missing binary stops the daemon with a clear message (" + t1 + " / " + (t1 == null ? null : t1.getCause()) + ")");
 
         Path notExec = root.resolve("not-executable");
         Files.writeString(notExec, "#!/bin/sh\nexit 0\n");
         Files.setPosixFilePermissions(notExec, PosixFilePermissions.fromString("rw-r--r--"));
-        IPCBridgeService noexec = new IPCBridgeService(new CoreIPCClient(freshSock().toString()), notExec.toString(), 0, 1000, 0);
+        IPCBridgeService noexec = new IPCBridgeService(new CoreIPCClient(freshSock().toString()), notExec.toString(), 0, 1000, 0, 300);
         Throwable t2 = thrown(noexec::startup);
         T.ok(t2 instanceof IllegalStateException && String.valueOf(t2.getCause()).contains("not executable"), "a binary that is not executable is reported as such (" + (t2 == null ? null : t2.getCause()) + ")");
 
         Path dies = root.resolve("dies-at-once");
         Files.writeString(dies, "#!/bin/sh\nexit 3\n");
         Files.setPosixFilePermissions(dies, PosixFilePermissions.fromString("rwxr-xr-x"));
-        IPCBridgeService quits = new IPCBridgeService(new CoreIPCClient(freshSock().toString()), dies.toString(), 0, 3000, 0);
+        IPCBridgeService quits = new IPCBridgeService(new CoreIPCClient(freshSock().toString()), dies.toString(), 0, 3000, 0, 300);
         long t0 = System.nanoTime();
         Throwable t3 = thrown(quits::startup);
         T.ok(t3 instanceof IllegalStateException && String.valueOf(t3.getCause()).contains("exited immediately"),
@@ -847,10 +847,32 @@ public class DaemonE2ETest {
         Path hangs = root.resolve("never-listens");
         Files.writeString(hangs, "#!/bin/sh\nexec sleep 30\n");
         Files.setPosixFilePermissions(hangs, PosixFilePermissions.fromString("rwxr-xr-x"));
-        IPCBridgeService stuck = new IPCBridgeService(new CoreIPCClient(freshSock().toString()), hangs.toString(), 0, 800, 0);
+        IPCBridgeService stuck = new IPCBridgeService(new CoreIPCClient(freshSock().toString()), hangs.toString(), 0, 800, 0, 300);
         Throwable t4 = thrown(stuck::startup);
         T.ok(t4 instanceof IllegalStateException && String.valueOf(t4.getCause()).contains("did not start listening"),
              "a core that never starts listening is given up on and killed (" + (t4 == null ? null : t4.getCause()) + ")");
+
+        /* The settings really reach the core's command line (a wrapper records its arguments, then
+         * becomes the real core). Out-of-range patience is clamped, not passed on to make the core refuse to start. */
+        Path argsFile = root.resolve("core-args.txt");
+        Path wrapper = root.resolve("core-wrapper");
+        Files.writeString(wrapper, "#!/bin/sh\nprintf '%s\\n' \"$@\" > '" + argsFile + "'\nexec '" + coreBin + "' \"$@\"\n");
+        Files.setPosixFilePermissions(wrapper, PosixFilePermissions.fromString("rwxr-xr-x"));
+        for (int[] c : new int[][] {{45, 45}, {0, 0}, {-5, 0}, {1_000_000, 86_400}}) {
+            Files.deleteIfExists(argsFile);
+            Path wsock = freshSock();
+            CoreIPCClient wipc = new CoreIPCClient(wsock.toString());
+            IPCBridgeService wrapped = new IPCBridgeService(wipc, wrapper.toString(), 0, 8000, 123456, c[0]);
+            try {
+                wrapped.startup();
+                List<String> got = Files.exists(argsFile) ? Files.readAllLines(argsFile) : List.of();
+                T.eq(List.of("--sock", wsock.toString(), "--log", "0", "--limit", "123456", "--patience", String.valueOf(c[1])), got,
+                     "patience-seconds=" + c[0] + " reaches the core as --patience " + c[1] + " (with the other settings)");
+            } finally {
+                wrapped.shutdown();
+                wipc.close();
+            }
+        }
 
         /* A healthy start and a clean stop. */
         Daemon d = Daemon.start(2, true);

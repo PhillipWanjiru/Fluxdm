@@ -29,6 +29,7 @@ SRCS := \
 	$(SRC_DIR)/segment.c       \
 	$(SRC_DIR)/connection.c    \
 	$(SRC_DIR)/resume.c        \
+	$(SRC_DIR)/hostgate.c      \
 	$(SRC_DIR)/bandwidth.c     \
 	$(SRC_DIR)/checksum.c      \
 	$(SRC_DIR)/errors.c        \

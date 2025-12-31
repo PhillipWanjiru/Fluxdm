@@ -5,10 +5,12 @@
  *
  * Usage:
  *   fluxdm-core [--sock <path>] [--limit <bytes_per_sec>] [--log <0|1|2>]
+ *               [--patience <seconds>]
  */
 
 #include "../include/downloader.h"
 #include "../include/errors.h"
+#include "../include/hostgate.h"
 #include "ipc/socket_server.h"
 #include <errno.h>
 #include <signal.h>
@@ -51,6 +53,8 @@ typedef struct {
     uint64_t    global_limit;    /* bytes/sec, 0 = unlimited */
     int         log_level;       /* 0 quiet, 1 info, 2 debug */
     const char *sock_path;       /* NULL = default           */
+    int         patience_set;    /* --patience was given     */
+    uint32_t    patience_ms;
 } flux_args_t;
 
 static void usage(FILE *out) {
@@ -60,8 +64,22 @@ static void usage(FILE *out) {
         "  --sock  <path>        Unix socket to listen on (default " FLUX_IPC_SOCK_PATH ")\n"
         "  --limit <bytes/sec>   Global bandwidth cap, 0 = unlimited (default 0)\n"
         "  --log   <0|1|2>       Log level: 0 quiet, 1 info, 2 debug (default 1)\n"
+        "  --patience <seconds>  How long a download keeps waiting for a server that answers\n"
+        "                        429 / 503 before it fails, 0 = fail at once (default 300)\n"
         "  --version             Print the version and exit\n"
         "  --help                Show this message\n", FLUXDM_CORE_VERSION);
+}
+
+/* A plain decimal number: no sign, no blanks, no trailing junk, no empty string
+ * (strtoull alone accepts "" as 0 and "-1" as 2^64-1). */
+static int parse_uint(const char *s, unsigned long long *out) {
+    if (*s < '0' || *s > '9') return -1;
+    char *end = NULL;
+    errno = 0;
+    unsigned long long v = strtoull(s, &end, 10);
+    if (errno != 0 || !end || *end != '\0') return -1;
+    *out = v;
+    return 0;
 }
 
 static int parse_args(int argc, char **argv, flux_args_t *args) {
@@ -73,15 +91,21 @@ static int parse_args(int argc, char **argv, flux_args_t *args) {
         int has_value = i + 1 < argc;
 
         if (strcmp(a, "--limit") == 0 && has_value) {
-            char *end = NULL;
-            errno = 0;
-            unsigned long long v = strtoull(argv[++i], &end, 10);
-            if (errno != 0 || !end || *end != '\0') { fprintf(stderr, "fluxdm-core: bad --limit value\n"); return -1; }
+            unsigned long long v;
+            if (parse_uint(argv[++i], &v) < 0) { fprintf(stderr, "fluxdm-core: bad --limit value\n"); return -1; }
             args->global_limit = (uint64_t)v;
         } else if (strcmp(a, "--log") == 0 && has_value) {
             args->log_level = atoi(argv[++i]);
             if (args->log_level < 0) args->log_level = 0;
             if (args->log_level > 2) args->log_level = 2;
+        } else if (strcmp(a, "--patience") == 0 && has_value) {
+            unsigned long long v;
+            if (parse_uint(argv[++i], &v) < 0 || v > 86400ull) {
+                fprintf(stderr, "fluxdm-core: bad --patience value (seconds, 0 to 86400)\n");
+                return -1;
+            }
+            args->patience_set = 1;
+            args->patience_ms  = (uint32_t)(v * 1000u);
         } else if (strcmp(a, "--sock") == 0 && has_value) {
             args->sock_path = argv[++i];
         } else if (strcmp(a, "--version") == 0) {
@@ -123,6 +147,7 @@ int main(int argc, char **argv) {
     flux_log_set_level(args.log_level);
     if (args.log_level > 0) print_banner(args.sock_path ? args.sock_path : FLUX_IPC_SOCK_PATH);
 
+    if (args.patience_set) flux_gate_set_patience_ms(args.patience_ms);
     raise_fd_limit();
     signal(SIGPIPE, SIG_IGN);                   /* broken pipes are reported through return codes */
 

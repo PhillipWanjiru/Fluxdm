@@ -357,6 +357,10 @@ static void test_parse_head(void) {
 
     EXPECT_EQ(http_status_is_retryable(503), 1);
     EXPECT_EQ(http_status_is_retryable(429), 1);
+    EXPECT_EQ(http_status_is_pushback(429), 1);
+    EXPECT_EQ(http_status_is_pushback(503), 1);
+    EXPECT_EQ(http_status_is_pushback(500) + http_status_is_pushback(502) + http_status_is_pushback(504) +
+              http_status_is_pushback(408) + http_status_is_pushback(404) + http_status_is_pushback(200), 0);
     EXPECT_EQ(http_status_is_retryable(404), 0);
     EXPECT_EQ(http_status_to_flux_error(401), FLUX_ERR_FORBIDDEN);
     EXPECT_EQ(http_status_to_flux_error(410), FLUX_ERR_NOT_FOUND_);
