@@ -15,16 +15,10 @@ public class Download {
     private Long    downloaded  = 0L;
     private Integer segments    = 8;
     private Integer status      = 0;  /* 0=pending 1=running 2=paused 3=done 4=error */
-    private Integer priority    = 5;  /* 1..10, higher starts first when downloads are queued */
-    private String  checksum;         /* hex digest to verify the finished file against, if any */
-    private Integer checksumType = 0; /* 0=none 1=md5 2=sha256 */
-    private String  errorMessage;     /* why the download failed (text from fluxdm-core), if it did */
-    private Long    bandwidthLimit = 0L;  /* bytes/s for this download, 0 = unlimited */
-
-    /* Live speed in bytes/s while the download is running. Not stored: filled in
-     * from the latest progress event whenever a download is read through the API. */
-    @Transient
-    private long    speedBps;
+    private Integer priority    = 5;
+    private String  checksum;
+    private Integer checksumType = 0;
+    private String  errorMessage;   /* last RSP_ERROR text from fluxdm-core, if any */
 
     /* getters + setters */
     public Long    getId()          { return id; }
@@ -49,8 +43,4 @@ public class Download {
     public void    setChecksumType(Integer t){ this.checksumType = t; }
     public String  getErrorMessage(){ return errorMessage; }
     public void    setErrorMessage(String m){ this.errorMessage = m; }
-    public Long    getBandwidthLimit(){ return bandwidthLimit != null ? bandwidthLimit : 0L; }
-    public void    setBandwidthLimit(Long b){ this.bandwidthLimit = b; }
-    public long    getSpeedBps()    { return speedBps; }
-    public void    setSpeedBps(long s){ this.speedBps = s; }
 }

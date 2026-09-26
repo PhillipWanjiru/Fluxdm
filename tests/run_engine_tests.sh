@@ -37,16 +37,15 @@ INCLUDES="-I$ROOT/engine/include -I$ROOT/core/include -I$ROOT/ipc"
 
 # ── Compile C core ────────────────────────────────────────────────────────────
 info "Compiling C core"
-C_SRCS="errors bandwidth checksum resume hostgate connection segment downloader"
+C_SRCS="errors bandwidth checksum resume connection segment downloader"
 for f in $C_SRCS; do
     gcc $CFLAGS $INCLUDES -c "$ROOT/core/src/${f}.c" -o "$BUILD_DIR/core/${f}.o"
     echo "  CC  ${f}.c"
 done
 gcc $CFLAGS $INCLUDES -c "$ROOT/core/src/protocol/http.c"       -o "$BUILD_DIR/core/http.o"
 gcc $CFLAGS $INCLUDES -c "$ROOT/core/src/protocol/https.c"      -o "$BUILD_DIR/core/https.o"
-gcc $CFLAGS $INCLUDES -c "$ROOT/core/src/ipc/frame_io.c"        -o "$BUILD_DIR/core/frame_io.o"
 gcc $CFLAGS $INCLUDES -c "$ROOT/core/src/ipc/socket_server.c"   -o "$BUILD_DIR/core/socket_server.o"
-echo "  CC  protocol/http.c, protocol/https.c, ipc/frame_io.c, ipc/socket_server.c"
+echo "  CC  protocol/http.c, protocol/https.c, ipc/socket_server.c"
 ok "C core compiled"
 
 # ── Compile C++ engine ────────────────────────────────────────────────────────

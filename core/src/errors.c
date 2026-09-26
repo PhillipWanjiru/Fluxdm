@@ -5,7 +5,6 @@
 #include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
-#include <unistd.h>
 
 /* ── Thread-local state ───────────────────────────────────────────────────── */
 #define FLUX_ERR_MSG_LEN 256
@@ -64,7 +63,6 @@ const char *flux_strerror(flux_error_t code) {
         case FLUX_ERR_RESET:      return "Connection reset by peer";
         case FLUX_ERR_PIPE:       return "Broken pipe";
         case FLUX_ERR_NETWORK:    return "Network error";
-        case FLUX_ERR_BAD_URL:    return "Invalid or unsupported URL";
         case FLUX_ERR_TLS_INIT:   return "TLS initialisation failed";
         case FLUX_ERR_TLS_HNDSHK: return "TLS handshake failed";
         case FLUX_ERR_TLS_IO:     return "TLS I/O error";
@@ -75,7 +73,6 @@ const char *flux_strerror(flux_error_t code) {
         case FLUX_ERR_HTTP_REDIR: return "Too many HTTP redirects";
         case FLUX_ERR_FORBIDDEN:  return "HTTP 403 Forbidden";
         case FLUX_ERR_SERVER:     return "HTTP server error";
-        case FLUX_ERR_REMOTE_CHANGED: return "File changed on the server";
         case FLUX_ERR_DISK_OPEN:  return "Cannot open file";
         case FLUX_ERR_DISK_WRITE: return "Disk write failed";
         case FLUX_ERR_DISK_READ:  return "Disk read failed";
@@ -92,29 +89,4 @@ const char *flux_strerror(flux_error_t code) {
         case FLUX_ERR_INTERNAL:   return "Internal error";
         default:                  return "Unknown error";
     }
-}
-
-/* ── Logging ──────────────────────────────────────────────────────────────── */
-static int g_log_level = 1;
-
-void flux_log_set_level(int level) { g_log_level = level; }
-int  flux_log_level(void)          { return g_log_level; }
-
-void flux_log(int level, const char *fmt, ...) {
-    if (level > g_log_level) return;
-
-    char    line[512];
-    int     n = snprintf(line, sizeof(line), "[fluxdm-core] ");
-    va_list ap;
-    va_start(ap, fmt);
-    int m = vsnprintf(line + n, sizeof(line) - (size_t)n - 1, fmt, ap);
-    va_end(ap);
-    if (m < 0) return;
-
-    size_t len = (size_t)n + (size_t)m;
-    if (len > sizeof(line) - 2) len = sizeof(line) - 2;   /* truncated */
-    line[len++] = '\n';
-
-    ssize_t w = write(STDERR_FILENO, line, len);
-    (void)w;
 }

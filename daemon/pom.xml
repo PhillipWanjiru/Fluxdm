@@ -3,14 +3,13 @@
      Maven build for the Java daemon (Phase 3): REST API, WebSocket,
      SQLite persistence, scheduler, and the IPC bridge to fluxdm-core.
 
-     The daemon's logic is tested WITHOUT Maven by tests/run_daemon_tests.sh:
-     it compiles daemon/src/main against tiny stand-ins for the Spring types
-     (tests/java/stubs) and runs the real service classes against a scripted
-     fake core and against the real fluxdm-core binary. Those tests are kept
-     out of src/test on purpose, so `mvn package` neither compiles nor runs
-     them. What they cannot show is how Spring itself wires and runs the
-     daemon (beans, JPA/SQLite, REST mappings, WebSocket): that is checked by
-     `mvn package` and by starting the daemon (dev_start.sh). -->
+     NOTE: this sandbox's network policy blocks Maven Central, so this
+     file could not be dependency-resolved or built with `mvn package`
+     inside the build environment that produced it. The wire-protocol
+     code (CoreIPCClient) that this project depends on WAS compiled and
+     tested standalone with javac against a mock server — see
+     tests/run_daemon_tests.sh. Run `mvn package` on a machine with
+     normal internet access to build the full Spring Boot jar. -->
 <project xmlns="http://maven.apache.org/POM/4.0.0"
          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
          xsi:schemaLocation="http://maven.apache.org/POM/4.0.0

@@ -1,180 +1,78 @@
 /* FluxDM — service/QueueService.java
- * Bounded concurrency for downloads: at most fluxdm.max-concurrent-downloads
- * hold a slot at once, everything else waits in line.
+ * Bounded concurrency admission control for downloads. Previously this
+ * queued incoming downloads but nothing ever drained the queue — every
+ * download started immediately regardless of how many were already
+ * running, making the class a no-op with respect to actual behavior.
  *
- * Slots are tracked BY DOWNLOAD ID, not by counting. Every operation is
- * idempotent: releasing a download that holds no slot (a second "finished"
- * signal, a cancel racing a failure, a pause of something that was only
- * waiting) changes nothing, so the active count can never drift below the
- * truth and admit more downloads than the limit allows.
- *
- *   submit(id, ...)   asks for a slot: ADMITTED (caller launches it) or QUEUED
- *   release(id)       gives the slot back (or leaves the line) and returns the
- *                     downloads that can start because of it — the caller
- *                     launches those
- *   adopt(id)         records a download that is already running in the core
- *
- * Order in line: higher priority first (Download.priority, 1..10), first come
- * first served among equals.
- *
- * Invariant: the line is non-empty only while every slot is taken, so a free
- * slot always means an empty line.
- *
- * The class only does bookkeeping. It never starts anything itself, so it holds
- * no locks while the caller talks to the core.
+ * Now: only up to fluxdm.max-concurrent-downloads run at once. Anything
+ * over that limit sits in the internal priority queue (highest priority
+ * first, matching Download.priority) until a running download finishes
+ * (success or error) and DownloadService calls releaseSlotAndAdmitNext()
+ * to free a slot and pull the next item in.
  */
 package com.fluxdm.service;
 
+import com.fluxdm.model.Download;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.HashSet;
+import java.util.Comparator;
 import java.util.List;
-import java.util.Map;
-import java.util.Set;
-import java.util.TreeSet;
+import java.util.concurrent.PriorityBlockingQueue;
+import java.util.concurrent.atomic.AtomicInteger;
 
 @Service
 public class QueueService {
 
-    /** How a download that is given a slot has to be launched. */
-    public enum Mode {
-        /** Never sent to the core, or the core no longer knows it. */
-        START,
-        /** Paused or failed in the core; ask it to carry on (the caller falls back to START if it has forgotten it). */
-        RESUME
-    }
-
-    public enum Outcome { ADMITTED, QUEUED, ALREADY_ACTIVE, ALREADY_QUEUED }
-
-    /** A download that has just been given a slot and must now be launched. */
-    public record Admission(long id, Mode mode) {}
-
-    private static final class Waiting {
-        final long id;
-        final long seq;
-        int        priority;
-        Mode       mode;
-
-        Waiting(long id, int priority, long seq, Mode mode) {
-            this.id = id; this.priority = priority; this.seq = seq; this.mode = mode;
-        }
-    }
-
-    private final Object lock = new Object();
+    @Value("${fluxdm.max-concurrent-downloads:4}")
     private int maxConcurrent;
-    private long nextSeq;
 
-    private final Set<Long> active = new HashSet<>();
-    private final Map<Long, Waiting> waitingById = new HashMap<>();
-    private final TreeSet<Waiting> line = new TreeSet<>((a, b) -> {
-        if (a.priority != b.priority) return Integer.compare(b.priority, a.priority);   /* higher first */
-        return Long.compare(a.seq, b.seq);                                              /* then arrival order */
-    });
+    private final AtomicInteger activeCount = new AtomicInteger(0);
 
-    public QueueService(@Value("${fluxdm.max-concurrent-downloads:4}") int maxConcurrent) {
-        this.maxConcurrent = Math.max(1, maxConcurrent);
-    }
+    private final PriorityBlockingQueue<Download> queue =
+        new PriorityBlockingQueue<>(16,
+            Comparator.comparingInt(d -> d.getPriority() != null ? d.getPriority() : 5));
 
-    /** Asks for a slot. Safe to repeat: a download that already has a slot or a place in line keeps it. */
-    public Outcome submit(long id, int priority, Mode mode) {
-        synchronized (lock) {
-            if (active.contains(id)) return Outcome.ALREADY_ACTIVE;
-
-            Waiting w = waitingById.get(id);
-            if (w != null) {
-                if (mode == Mode.START) w.mode = Mode.START;       /* START works from every state, RESUME only from some */
-                if (priority != w.priority) {                      /* new priority, same arrival order */
-                    line.remove(w);
-                    w.priority = priority;
-                    line.add(w);
-                }
-                return Outcome.ALREADY_QUEUED;
-            }
-
-            if (active.size() < maxConcurrent) {
-                active.add(id);
-                return Outcome.ADMITTED;
-            }
-            Waiting nw = new Waiting(id, priority, nextSeq++, mode);
-            line.add(nw);
-            waitingById.put(id, nw);
-            return Outcome.QUEUED;
+    /**
+     * Call when a download is first requested. Returns true if it was
+     * admitted (caller should start it immediately via the IPC client),
+     * or false if it was placed in the queue instead (caller must NOT
+     * start it — it stays at whatever status the caller already set,
+     * typically PENDING, until releaseSlotAndAdmitNext() admits it).
+     */
+    public synchronized boolean tryAdmit(Download dl) {
+        if (activeCount.get() < maxConcurrent) {
+            activeCount.incrementAndGet();
+            return true;
         }
+        queue.offer(dl);
+        return false;
     }
 
-    /** Gives the download's slot back, or removes it from the line if it never had one.
-     *  Returns what can start now. Releasing an unknown id returns an empty list. */
-    public List<Admission> release(long id) {
-        synchronized (lock) {
-            Waiting w = waitingById.remove(id);
-            if (w != null) {
-                line.remove(w);
-                return List.of();                                  /* it never held a slot, so none is freed */
-            }
-            if (!active.remove(id)) return List.of();
-            return promote();
-        }
+    /**
+     * Call when a running download finishes, successfully or not. Frees
+     * its slot and, if anything is waiting, admits the next one by
+     * priority. Returns the newly-admitted Download (caller must start
+     * it via the IPC client), or null if the queue was empty.
+     */
+    public synchronized Download releaseSlotAndAdmitNext() {
+        activeCount.decrementAndGet();
+        Download next = queue.poll();
+        if (next != null) activeCount.incrementAndGet();
+        return next;
     }
 
-    /** Records a download that is already running in the core. It takes a slot even
-     *  when that exceeds the limit: the work is happening, the books must say so. */
-    public void adopt(long id) {
-        synchronized (lock) {
-            Waiting w = waitingById.remove(id);
-            if (w != null) line.remove(w);
-            active.add(id);
-        }
+    /** Remove a specific download from the wait queue (e.g. user cancelled
+     *  it before it ever got a slot). Returns true if it was queued and
+     *  is now removed; false if it wasn't in the queue (already running,
+     *  or never existed). */
+    public synchronized boolean removeFromQueue(Download dl) {
+        return queue.remove(dl);
     }
 
-    /** Forgets everything. Used when the core's state has to be rebuilt from scratch. */
-    public void reset() {
-        synchronized (lock) {
-            active.clear();
-            waitingById.clear();
-            line.clear();
-        }
-    }
-
-    /** Changes the limit. Returns what can start now if it grew. */
-    public List<Admission> setMaxConcurrent(int max) {
-        synchronized (lock) {
-            this.maxConcurrent = Math.max(1, max);
-            return promote();
-        }
-    }
-
-    public boolean isActive(long id)  { synchronized (lock) { return active.contains(id); } }
-    public boolean isWaiting(long id) { synchronized (lock) { return waitingById.containsKey(id); } }
-    public int  activeCount()         { synchronized (lock) { return active.size(); } }
-    public int  queuedCount()         { synchronized (lock) { return line.size(); } }
-    public int  maxConcurrent()       { synchronized (lock) { return maxConcurrent; } }
-
-    /** Ids waiting for a slot, in the order they will be admitted. */
-    public List<Long> waitingIds() {
-        synchronized (lock) {
-            List<Long> out = new ArrayList<>(line.size());
-            for (Waiting w : line) out.add(w.id);
-            return out;
-        }
-    }
-
-    /** Ids holding a slot. */
-    public Set<Long> activeIds() {
-        synchronized (lock) { return new HashSet<>(active); }
-    }
-
-    private List<Admission> promote() {
-        List<Admission> out = null;
-        while (active.size() < maxConcurrent && !line.isEmpty()) {
-            Waiting w = line.pollFirst();
-            waitingById.remove(w.id);
-            active.add(w.id);
-            if (out == null) out = new ArrayList<>(2);
-            out.add(new Admission(w.id, w.mode));
-        }
-        return out == null ? List.of() : out;
-    }
+    public int activeCount()        { return activeCount.get(); }
+    public int maxConcurrent()      { return maxConcurrent; }
+    public int queuedCount()        { return queue.size(); }
+    public List<Download> snapshot(){ return new ArrayList<>(queue); }
 }

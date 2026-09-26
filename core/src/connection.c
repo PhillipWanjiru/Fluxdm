@@ -13,10 +13,7 @@
 #include <stdio.h>
 #include <unistd.h>
 
-/* Headers and chunk framing are all that ever pass through this buffer —
- * identity-encoded bodies are read straight into the segment's write buffer
- * (see segment.c) — so 64 KiB is plenty and keeps 64 segments cheap. */
-#define RBUF_DEFAULT_CAP (64 * 1024)
+#define RBUF_DEFAULT_CAP (512 * 1024)
 
 /* ── Internal helpers ─────────────────────────────────────────────────────── */
 
@@ -73,60 +70,43 @@ flux_conn_t *flux_conn_new(const char *host, uint16_t port, int use_tls) {
     return c;
 }
 
-void flux_conn_set_addr(flux_conn_t *c, const struct sockaddr *sa, socklen_t len) {
-    if (!c || !sa || len == 0 || len > sizeof(c->addr)) return;
-    memcpy(&c->addr, sa, len);
-    c->addr_len = len;
-}
+int flux_conn_start_connect(flux_conn_t *c) {
+    struct addrinfo hints = {0}, *res = NULL;
+    char port_str[8];
+    snprintf(port_str, sizeof(port_str), "%u", c->port);
+    hints.ai_family   = AF_UNSPEC;
+    hints.ai_socktype = SOCK_STREAM;
 
-/* Begin one non-blocking connect to `sa`. Returns the fd (state set to
- * CONNECTING) or -1. The connection is *always* reported as CONNECTING,
- * even if connect() succeeded instantly: the first EPOLLOUT then drives
- * flux_conn_finish_connect(), which is where TLS gets attached. Marking an
- * instant connect READY would skip the TLS handshake and send the request
- * in plaintext to a TLS port. */
-static int connect_one(flux_conn_t *c, int family, int socktype, int protocol,
-                       const struct sockaddr *sa, socklen_t salen) {
-    int fd = socket(family, socktype, protocol);
-    if (fd < 0) return -1;
-
-    if (set_nonblocking(fd) < 0 || set_socket_opts(fd) < 0) {
-        close(fd);
+    int rc = getaddrinfo(c->host, port_str, &hints, &res);
+    if (rc != 0) {
+        flux_set_error(FLUX_ERR_DNS, "getaddrinfo(%s): %s",
+                       c->host, gai_strerror(rc));
         return -1;
     }
-    if (connect(fd, sa, salen) == 0 || errno == EINPROGRESS) {
-        c->state = CONN_STATE_CONNECTING;
-        return fd;
-    }
-    close(fd);
-    return -1;
-}
 
-int flux_conn_start_connect(flux_conn_t *c) {
     int fd = -1;
+    for (struct addrinfo *ai = res; ai; ai = ai->ai_next) {
+        fd = socket(ai->ai_family, ai->ai_socktype, ai->ai_protocol);
+        if (fd < 0) continue;
 
-    if (c->addr_len > 0) {
-        /* Pre-resolved by the probe: no DNS. */
-        fd = connect_one(c, c->addr.ss_family, SOCK_STREAM, 0,
-                         (const struct sockaddr *)&c->addr, c->addr_len);
-    } else {
-        struct addrinfo hints = {0}, *res = NULL;
-        char port_str[8];
-        snprintf(port_str, sizeof(port_str), "%u", c->port);
-        hints.ai_family   = AF_UNSPEC;
-        hints.ai_socktype = SOCK_STREAM;
-
-        int rc = getaddrinfo(c->host, port_str, &hints, &res);
-        if (rc != 0) {
-            flux_set_error(FLUX_ERR_DNS, "getaddrinfo(%s): %s",
-                           c->host, gai_strerror(rc));
-            return -1;
+        if (set_nonblocking(fd) < 0 || set_socket_opts(fd) < 0) {
+            close(fd); fd = -1; continue;
         }
-        for (struct addrinfo *ai = res; ai && fd < 0; ai = ai->ai_next)
-            fd = connect_one(c, ai->ai_family, ai->ai_socktype, ai->ai_protocol,
-                             ai->ai_addr, ai->ai_addrlen);
-        freeaddrinfo(res);
+
+        rc = connect(fd, ai->ai_addr, ai->ai_addrlen);
+        if (rc == 0) {
+            /* Instant connect (rare on non-loopback) */
+            c->state = CONN_STATE_READY;
+            break;
+        }
+        if (errno == EINPROGRESS) {
+            /* Normal non-blocking path — wait for EPOLLOUT */
+            c->state = CONN_STATE_CONNECTING;
+            break;
+        }
+        close(fd); fd = -1;
     }
+    freeaddrinfo(res);
 
     if (fd < 0) {
         flux_set_error(FLUX_ERR_CONNECT, "Cannot connect to %s:%u", c->host, c->port);
@@ -245,17 +225,10 @@ ssize_t flux_conn_send(flux_conn_t *c, const void *buf, size_t len) {
         }
 
         if (n < 0) {
-            if (c->use_tls && c->tls) {
-                /* flux_tls_write() already recorded the cause: WOULDBLOCK or TLS_IO */
-                if (flux_last_error() == FLUX_ERR_WOULDBLOCK) return sent > 0 ? sent : -1;
-                c->state = CONN_STATE_ERROR;
-                return -1;
-            }
             if (errno == EAGAIN || errno == EWOULDBLOCK) {
                 flux_set_error(FLUX_ERR_WOULDBLOCK, "send EAGAIN");
                 return sent > 0 ? sent : -1;
             }
-            if (errno == EINTR) continue;
             flux_set_syserror("send");
             c->state = CONN_STATE_ERROR;
             return -1;
@@ -281,18 +254,9 @@ ssize_t flux_conn_recv(flux_conn_t *c, void *buf, size_t len) {
     }
 
     if (n < 0) {
-        if (c->use_tls && c->tls) {
-            /* flux_tls_read() already recorded the cause: WOULDBLOCK or TLS_IO */
-            if (flux_last_error() != FLUX_ERR_WOULDBLOCK) c->state = CONN_STATE_ERROR;
-            return -1;
-        }
         if (errno == EAGAIN || errno == EWOULDBLOCK) {
             flux_set_error(FLUX_ERR_WOULDBLOCK, "recv EAGAIN");
             return -1;
-        }
-        if (errno == EINTR) {
-            flux_set_error(FLUX_ERR_WOULDBLOCK, "recv interrupted");
-            return -1;                 /* level-triggered epoll will call again */
         }
         flux_set_syserror("recv");
         c->state = CONN_STATE_ERROR;
@@ -305,10 +269,6 @@ ssize_t flux_conn_recv(flux_conn_t *c, void *buf, size_t len) {
 
 /* Fill the ring buffer from the socket */
 ssize_t flux_conn_fill(flux_conn_t *c) {
-    /* Empty buffer: rewind so the whole capacity is available again without
-     * a compaction memmove. */
-    if (c->rbuf_start == c->rbuf_end) c->rbuf_start = c->rbuf_end = 0;
-
     /* Available space — ring buffer is linear (end never wraps in this impl) */
     size_t space = c->rbuf_cap - c->rbuf_end;
     if (space == 0) {

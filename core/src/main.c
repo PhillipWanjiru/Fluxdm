@@ -1,129 +1,78 @@
 /* FluxDM — core/src/main.c
- * Entry point of the C core daemon process.
- * The Java daemon starts this process on boot and talks to it over a Unix
- * socket (default /tmp/fluxdm.sock, mode 0600).
+ * Entry point for the C core daemon process.
+ * Handles signals, initialises the registry, and runs the IPC server.
+ * The Java daemon starts this process on boot and communicates via
+ * the Unix socket at /tmp/fluxdm.sock.
  *
  * Usage:
- *   fluxdm-core [--sock <path>] [--limit <bytes_per_sec>] [--log <0|1|2>]
- *               [--patience <seconds>]
+ *   fluxdm-core [--sock <path>] [--limit <bytes_per_sec>] [--log <level>]
  */
 
 #include "../include/downloader.h"
 #include "../include/errors.h"
-#include "../include/hostgate.h"
+#include "../include/protocol/https.h"
 #include "ipc/socket_server.h"
-#include <errno.h>
-#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/resource.h>
+#include <signal.h>
 #include <unistd.h>
+#include <sys/resource.h>
+#include <errno.h>
 
-#define FLUXDM_CORE_VERSION "1.0"
-
+/* ── Globals ──────────────────────────────────────────────────────────────── */
 static flux_registry_t   g_registry;
 static flux_ipc_server_t g_ipc_server;
+static volatile int      g_shutdown = 0;
 
-/* ── Signals ──────────────────────────────────────────────────────────────── */
-
-/* Only async-signal-safe work: flux_ipc_stop() stores a flag and write()s an eventfd. */
+/* ── Signal handler ───────────────────────────────────────────────────────── */
 static void handle_signal(int sig) {
     (void)sig;
+    g_shutdown = 1;
     flux_ipc_stop(&g_ipc_server);
 }
 
-/* Every segment needs a socket: lift the soft open-file limit to the hard one. */
+/* ── Raise file descriptor limit ──────────────────────────────────────────── */
 static void raise_fd_limit(void) {
     struct rlimit rl;
-    if (getrlimit(RLIMIT_NOFILE, &rl) != 0) return;
-    rlim_t want = rl.rlim_max;
-    if (want == RLIM_INFINITY || want > 1048576) want = 1048576;
-    if (rl.rlim_cur >= want) return;
-    rl.rlim_cur = want;
-    if (setrlimit(RLIMIT_NOFILE, &rl) != 0) {          /* e.g. above fs.nr_open */
-        rl.rlim_cur = 65536 < rl.rlim_max ? 65536 : rl.rlim_max;
+    if (getrlimit(RLIMIT_NOFILE, &rl) == 0) {
+        rl.rlim_cur = rl.rlim_max;
         setrlimit(RLIMIT_NOFILE, &rl);
     }
 }
 
-/* ── Arguments ────────────────────────────────────────────────────────────── */
-
+/* ── Argument parser ──────────────────────────────────────────────────────── */
 typedef struct {
-    uint64_t    global_limit;    /* bytes/sec, 0 = unlimited */
-    int         log_level;       /* 0 quiet, 1 info, 2 debug */
-    const char *sock_path;       /* NULL = default           */
-    int         patience_set;    /* --patience was given     */
-    uint32_t    patience_ms;
+    uint64_t global_limit;   /* bytes/sec, 0 = unlimited */
+    int      log_level;      /* 0=quiet 1=info 2=debug   */
 } flux_args_t;
 
-static void usage(FILE *out) {
-    fprintf(out,
-        "FluxDM core daemon %s\n"
-        "Usage: fluxdm-core [options]\n"
-        "  --sock  <path>        Unix socket to listen on (default " FLUX_IPC_SOCK_PATH ")\n"
-        "  --limit <bytes/sec>   Global bandwidth cap, 0 = unlimited (default 0)\n"
-        "  --log   <0|1|2>       Log level: 0 quiet, 1 info, 2 debug (default 1)\n"
-        "  --patience <seconds>  How long a download keeps waiting for a server that answers\n"
-        "                        429 / 503 before it fails, 0 = fail at once (default 300)\n"
-        "  --version             Print the version and exit\n"
-        "  --help                Show this message\n", FLUXDM_CORE_VERSION);
-}
-
-/* A plain decimal number: no sign, no blanks, no trailing junk, no empty string
- * (strtoull alone accepts "" as 0 and "-1" as 2^64-1). */
-static int parse_uint(const char *s, unsigned long long *out) {
-    if (*s < '0' || *s > '9') return -1;
-    char *end = NULL;
-    errno = 0;
-    unsigned long long v = strtoull(s, &end, 10);
-    if (errno != 0 || !end || *end != '\0') return -1;
-    *out = v;
-    return 0;
-}
-
-static int parse_args(int argc, char **argv, flux_args_t *args) {
+static void parse_args(int argc, char **argv, flux_args_t *args) {
     memset(args, 0, sizeof(*args));
-    args->log_level = 1;
+    args->log_level = 1;  /* default: info */
 
     for (int i = 1; i < argc; i++) {
-        const char *a = argv[i];
-        int has_value = i + 1 < argc;
-
-        if (strcmp(a, "--limit") == 0 && has_value) {
-            unsigned long long v;
-            if (parse_uint(argv[++i], &v) < 0) { fprintf(stderr, "fluxdm-core: bad --limit value\n"); return -1; }
-            args->global_limit = (uint64_t)v;
-        } else if (strcmp(a, "--log") == 0 && has_value) {
+        if (strcmp(argv[i], "--limit") == 0 && i + 1 < argc) {
+            args->global_limit = (uint64_t)strtoull(argv[++i], NULL, 10);
+        } else if (strcmp(argv[i], "--log") == 0 && i + 1 < argc) {
             args->log_level = atoi(argv[++i]);
-            if (args->log_level < 0) args->log_level = 0;
-            if (args->log_level > 2) args->log_level = 2;
-        } else if (strcmp(a, "--patience") == 0 && has_value) {
-            unsigned long long v;
-            if (parse_uint(argv[++i], &v) < 0 || v > 86400ull) {
-                fprintf(stderr, "fluxdm-core: bad --patience value (seconds, 0 to 86400)\n");
-                return -1;
-            }
-            args->patience_set = 1;
-            args->patience_ms  = (uint32_t)(v * 1000u);
-        } else if (strcmp(a, "--sock") == 0 && has_value) {
-            args->sock_path = argv[++i];
-        } else if (strcmp(a, "--version") == 0) {
-            printf("fluxdm-core %s\n", FLUXDM_CORE_VERSION);
-            exit(0);
-        } else if (strcmp(a, "--help") == 0 || strcmp(a, "-h") == 0) {
-            usage(stdout);
+        } else if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
+            fprintf(stderr,
+                "FluxDM Core Daemon\n"
+                "Usage: fluxdm-core [options]\n"
+                "  --limit  <bytes/sec>  Global bandwidth cap (0=unlimited)\n"
+                "  --log    <0|1|2>      Log level: 0=quiet 1=info 2=debug\n"
+                "  --help                Show this message\n"
+            );
             exit(0);
         } else {
-            fprintf(stderr, "fluxdm-core: unknown or incomplete argument: %s\n", a);
-            usage(stderr);
-            return -1;
+            fprintf(stderr, "[fluxdm-core] unknown arg: %s\n", argv[i]);
         }
     }
-    return 0;
 }
 
-static void print_banner(const char *sock_path) {
+/* ── Banner ───────────────────────────────────────────────────────────────── */
+static void print_banner(void) {
     fprintf(stderr,
         "\n"
         "  ███████╗██╗     ██╗   ██╗██╗  ██╗██████╗ ███╗   ███╗\n"
@@ -133,55 +82,58 @@ static void print_banner(const char *sock_path) {
         "  ██║     ███████╗╚██████╔╝██╔╝ ██╗██████╔╝██║ ╚═╝ ██║\n"
         "  ╚═╝     ╚══════╝ ╚═════╝ ╚═╝  ╚═╝╚═════╝ ╚═╝     ╚═╝\n"
         "\n"
-        "  C core daemon %s\n"
-        "  IPC socket : %s\n"
-        "\n", FLUXDM_CORE_VERSION, sock_path);
+        "  C Core Daemon — Phase 1\n"
+        "  IPC socket : " FLUX_IPC_SOCK_PATH "\n"
+        "\n"
+    );
 }
 
 /* ── Main ─────────────────────────────────────────────────────────────────── */
-
 int main(int argc, char **argv) {
     flux_args_t args;
-    if (parse_args(argc, argv, &args) < 0) return 2;
+    parse_args(argc, argv, &args);
 
-    flux_log_set_level(args.log_level);
-    if (args.log_level > 0) print_banner(args.sock_path ? args.sock_path : FLUX_IPC_SOCK_PATH);
+    if (args.log_level > 0) print_banner();
 
-    if (args.patience_set) flux_gate_set_patience_ms(args.patience_ms);
+    /* Raise open-file limit — each segment needs a socket */
     raise_fd_limit();
-    signal(SIGPIPE, SIG_IGN);                   /* broken pipes are reported through return codes */
 
-    if (flux_registry_init(&g_registry) < 0) {
-        fprintf(stderr, "[fluxdm-core] cannot initialise: %s\n", flux_last_error_str());
-        return 1;
-    }
-    if (args.global_limit > 0) {
-        flux_bw_set_rate(&g_registry.global_bw, args.global_limit);
-        flux_log(1, "global limit: %llu bytes/sec", (unsigned long long)args.global_limit);
-    }
+    /* Block SIGPIPE globally — we handle broken pipes via return codes */
+    signal(SIGPIPE, SIG_IGN);
 
-    if (flux_ipc_server_init(&g_ipc_server, &g_registry, args.sock_path) < 0) {
-        fprintf(stderr, "[fluxdm-core] cannot start the IPC server: %s\n", flux_last_error_str());
-        flux_ipc_server_close(&g_ipc_server);
-        flux_registry_destroy(&g_registry);
-        return 1;
-    }
-
-    /* Handlers go in only now: flux_ipc_stop() needs the server's wake-up fd. */
-    struct sigaction sa;
-    memset(&sa, 0, sizeof(sa));
+    /* Graceful shutdown on SIGTERM / SIGINT */
+    struct sigaction sa = {0};
     sa.sa_handler = handle_signal;
     sigemptyset(&sa.sa_mask);
     sigaction(SIGTERM, &sa, NULL);
     sigaction(SIGINT,  &sa, NULL);
-    sigaction(SIGHUP,  &sa, NULL);
 
-    int rc = flux_ipc_server_run(&g_ipc_server);
+    /* Initialise OpenSSL and download registry */
+    if (flux_registry_init(&g_registry) < 0) {
+        fprintf(stderr, "[fluxdm-core] registry init failed: %s\n",
+                flux_last_error_str());
+        return 1;
+    }
 
-    flux_log(1, "shutting down...");
-    flux_registry_destroy(&g_registry);         /* stops every download, keeping partial files and resume state */
-    flux_ipc_server_close(&g_ipc_server);
-    flux_log(1, "goodbye.");
+    /* Apply global bandwidth limit if specified */
+    if (args.global_limit > 0) {
+        flux_bw_set_rate(&g_registry.global_bw, args.global_limit);
+        if (args.log_level > 0)
+            fprintf(stderr, "[fluxdm-core] global limit: %llu bytes/sec\n",
+                    (unsigned long long)args.global_limit);
+    }
+
+    /* Run IPC server — blocks until SIGTERM/SIGINT or CMD_SHUTDOWN */
+    int rc = flux_ipc_server_run(&g_ipc_server, &g_registry);
+
+    if (args.log_level > 0)
+        fprintf(stderr, "[fluxdm-core] shutting down...\n");
+
+    /* Teardown: pause all active downloads and flush resume state */
+    flux_registry_destroy(&g_registry);
+
+    if (args.log_level > 0)
+        fprintf(stderr, "[fluxdm-core] goodbye.\n");
 
     return rc < 0 ? 1 : 0;
 }

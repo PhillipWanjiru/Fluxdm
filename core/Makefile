@@ -4,8 +4,7 @@
 #
 # Targets:
 #   make          — build release binary
-#   make debug    — build with ASan + UBSan + debug symbols
-#   make tsan     — build with ThreadSanitizer (run `make clean` first)
+#   make debug    — build with sanitizers + debug symbols
 #   make clean    — remove build artefacts
 #   make install  — copy binary to /usr/local/bin
 
@@ -29,13 +28,11 @@ SRCS := \
 	$(SRC_DIR)/segment.c       \
 	$(SRC_DIR)/connection.c    \
 	$(SRC_DIR)/resume.c        \
-	$(SRC_DIR)/hostgate.c      \
 	$(SRC_DIR)/bandwidth.c     \
 	$(SRC_DIR)/checksum.c      \
 	$(SRC_DIR)/errors.c        \
 	$(PROTO_SRC)/http.c        \
 	$(PROTO_SRC)/https.c       \
-	$(IPC_SRC)/frame_io.c      \
 	$(IPC_SRC)/socket_server.c
 
 OBJS := $(patsubst %.c,$(BUILD_DIR)/%.o,$(SRCS))
@@ -70,7 +67,7 @@ CFLAGS  := $(CFLAGS_RELEASE)
 LDFLAGS := $(LDFLAGS_RELEASE)
 
 # ── Rules ─────────────────────────────────────────────────────────────────────
-.PHONY: all debug tsan clean install check-deps
+.PHONY: all debug clean install check-deps
 
 all: check-deps $(BIN)
 	@echo ""
@@ -83,15 +80,14 @@ debug: LDFLAGS := $(LDFLAGS_DEBUG)
 debug: $(BIN)
 	@echo "  ✔  Built $(BIN) (debug + ASan + UBSan)"
 
-# Data-race checking: `make clean && make tsan`
-tsan: CFLAGS  := $(CFLAGS_COMMON) -O1 -g3 -DDEBUG -fsanitize=thread -fno-omit-frame-pointer
-tsan: LDFLAGS := $(LDFLAGS_COMMON) -fsanitize=thread
-tsan: $(BIN)
-	@echo "  ✔  Built $(BIN) (ThreadSanitizer)"
-
 $(BIN): $(OBJS)
 	@echo "  LD  $@"
 	@$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
+
+$(BUILD_DIR)/%.o: %.c
+	@mkdir -p $(dir $@)
+	@echo "  CC  $<"
+	@$(CC) $(CFLAGS) -c -o $@ $<
 
 # ── Dependency generation (header changes trigger recompile) ──────────────────
 DEPS := $(OBJS:.o=.d)

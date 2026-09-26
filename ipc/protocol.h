@@ -41,19 +41,12 @@ typedef enum __attribute__((packed)) {
     FLUX_RSP_STATUS       = 0x14,
 } flux_msg_type_t;
 
-/* ── Frame flags (flux_header_t::flags) ───────────────────────────────────── */
-/* Set on frames the core pushes on its own initiative (progress, completion
- * and asynchronous errors). Replies to a command never carry it. A client uses
- * it to tell "the answer to my PAUSE" from "download 7 just failed" — both are
- * RSP_ERROR frames carrying the same id. */
-#define FLUX_FLAG_EVENT   0x0001u
-
 /* ── Frame header (fixed 16 bytes) ────────────────────────────────────────── */
 typedef struct __attribute__((packed)) {
     uint32_t magic;
     uint8_t  version;
     uint8_t  type;          /* flux_msg_type_t               */
-    uint16_t flags;         /* FLUX_FLAG_* bits, 0 for replies */
+    uint16_t flags;         /* reserved, set to 0            */
     uint32_t id;            /* download id (0 = global)      */
     uint32_t payload_len;   /* bytes that follow this header */
 } flux_header_t;

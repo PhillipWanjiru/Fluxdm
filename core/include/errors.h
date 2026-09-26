@@ -24,7 +24,6 @@ typedef enum {
     FLUX_ERR_RESET       = 13,
     FLUX_ERR_PIPE        = 14,
     FLUX_ERR_NETWORK     = 15,   /* generic network error */
-    FLUX_ERR_BAD_URL     = 16,   /* URL could not be parsed / unsupported scheme */
 
     /* TLS */
     FLUX_ERR_TLS_INIT    = 20,
@@ -39,7 +38,6 @@ typedef enum {
     FLUX_ERR_HTTP_REDIR  = 33,   /* too many redirects       */
     FLUX_ERR_FORBIDDEN   = 34,   /* HTTP 403 */
     FLUX_ERR_SERVER      = 35,   /* HTTP 5xx */
-    FLUX_ERR_REMOTE_CHANGED = 36, /* file changed on the server mid-download */
 
     /* File / Disk */
     FLUX_ERR_DISK_OPEN   = 40,
@@ -87,12 +85,3 @@ const char *flux_strerror(flux_error_t code);
 
 /* Propagate errno into flux error store. */
 void flux_set_syserror(const char *context);
-
-/* ── Logging ──────────────────────────────────────────────────────────────── */
-/* Process-wide log verbosity: 0 = silent, 1 = info, 2 = debug.
- * flux_log() formats into one buffer and emits it with a single write(2) so
- * lines from different download threads never interleave mid-line. */
-void flux_log_set_level(int level);
-int  flux_log_level(void);
-void flux_log(int level, const char *fmt, ...)
-    __attribute__((format(printf, 2, 3)));

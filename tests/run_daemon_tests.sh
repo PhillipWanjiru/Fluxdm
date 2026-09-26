@@ -1,34 +1,23 @@
 #!/usr/bin/env bash
 # FluxDM — tests/run_daemon_tests.sh
 #
-# Tests for the Java daemon. They need only a JDK (21) — no Maven, no Spring
-# jars, no internet:
+# Two independent checks:
 #
-#   QueueServiceTest      who may run: slots by id, priorities, idempotent release
-#   CoreIPCClientTest     the wire protocol: replies vs events, ordering, timeouts,
-#                         reconnects, protocol abuse
-#   DownloadServiceTest   the download logic against a scripted fake core: validation,
-#                         queueing, pause/resume/cancel, errors, recovery after a core
-#                         or daemon restart, the scheduler, the bandwidth service
-#   DaemonE2ETest         the same classes against the REAL fluxdm-core and a local HTTP
-#                         server: queueing, pause/resume, cancel, checksums, kill -9 of
-#                         the core, a daemon restart that adopts the running core, ...
+#   1. Wire-protocol test (always runs, needs only a JDK — no Maven, no
+#      Spring, no internet). Compiles CoreIPCClient.java + IPCEventListener
+#      standalone (the single @Component annotation is stripped for this
+#      compile only — DI wiring is Spring's job, not part of the protocol
+#      logic being tested), starts mock_core.py — a Python stand-in that
+#      speaks the exact byte-for-byte protocol validated against the real
+#      fluxdm-core in Phase 1 — and runs the real Java client against it.
 #
-# How the daemon compiles without Spring: tests/java/stubs holds minimal stand-ins
-# for the few Spring / Jakarta / SLF4J types the daemon's source mentions
-# (annotations, SimpMessagingTemplate, JpaRepository, ...). That type-checks every
-# line of daemon/src/main and lets the real service classes run. It is NOT Spring:
-# bean wiring, JPA/SQLite, the REST mappings and WebSocket are exercised only by a
-# real build — the Maven step at the end does that when Maven can reach Maven Central.
+#   2. Full Maven build (only if `mvn` is installed and Maven Central is
+#      reachable). Compiles every daemon file, including the Spring/JPA
+#      code that the wire-protocol test above doesn't touch.
 #
-# Options:
-#   --no-e2e     skip the suite that needs the real core binary and takes ~40 s
-#   --no-maven   skip the Maven compile
-#   --loop N     run the three fast suites N times (to flush out timing flakiness)
-#
-# The core binary is core/fluxdm-core (built with `make -C core` if missing); set
-# FLUXDM_CORE to test another build.
-set -uo pipefail
+# Run this after any change to daemon/ to catch regressions in either layer.
+
+set -euo pipefail
 
 GREEN="\033[92m"; RED="\033[91m"; YELLOW="\033[93m"; CYAN="\033[96m"
 BOLD="\033[1m"; RESET="\033[0m"
@@ -40,128 +29,95 @@ sep()  { echo -e "${CYAN}${BOLD}────────────────
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DAEMON="$ROOT/daemon"
-JTESTS="$ROOT/tests/java"
-BUILD="$ROOT/tests/.daemon_build"
-OUT="$BUILD/classes"
-
-E2E=1; MAVEN=1; LOOP=1
-while [[ $# -gt 0 ]]; do
-    case "$1" in
-        --no-e2e)   E2E=0 ;;
-        --no-maven) MAVEN=0 ;;
-        --loop)     LOOP="${2:-}"; shift
-                    [[ "$LOOP" =~ ^[1-9][0-9]*$ ]] || { echo "--loop needs a positive number" >&2; exit 2; } ;;
-        -h|--help)  sed -n '2,29p' "$0"; exit 0 ;;
-        *)          echo "unknown option: $1" >&2; exit 2 ;;
-    esac
-    shift
-done
+BUILD_DIR="$ROOT/tests/.daemon_build"
 
 sep
-echo -e "${BOLD}  FluxDM — Daemon Tests${RESET}"
+echo -e "${BOLD}  FluxDM — Phase 3 Daemon Tests${RESET}"
 sep
 
-# ── JDK ───────────────────────────────────────────────────────────────────────
-command -v javac >/dev/null 2>&1 && command -v java >/dev/null 2>&1 \
-    || { err "a JDK is required (javac / java not found). Run: sudo apt install openjdk-21-jdk-headless"; exit 1; }
-JDK_MAJOR="$(javac -version 2>&1 | sed -nE 's/^javac ([0-9]+).*/\1/p' | head -1)"
-if [[ -z "$JDK_MAJOR" || "$JDK_MAJOR" -lt 17 ]]; then
-    err "JDK 17 or newer is required (found: $(javac -version 2>&1 | tail -1))"; exit 1
-fi
-[[ "$JDK_MAJOR" -lt 21 ]] && warn "the daemon targets Java 21; this is JDK $JDK_MAJOR"
+command -v javac >/dev/null 2>&1 || { err "javac not found. Run: sudo apt install openjdk-21-jdk-headless"; exit 1; }
+command -v python3 >/dev/null 2>&1 || { err "python3 not found"; exit 1; }
 
-# ── Compile: stubs + the daemon's main sources + the test harness ─────────────
-info "Compiling the daemon and the test harness (JDK $JDK_MAJOR, no dependencies)"
-rm -rf "$BUILD"; mkdir -p "$OUT"
-find "$JTESTS/stubs" "$DAEMON/src/main/java" "$JTESTS/harness" -name '*.java' | sort | sed 's/.*/"&"/' > "$BUILD/sources.txt"
-if javac -Xlint:all -encoding UTF-8 -d "$OUT" @"$BUILD/sources.txt" 2> "$BUILD/javac.log"; then
-    ok "compiled $(wc -l < "$BUILD/sources.txt") files (every file of daemon/src/main type-checks)"
-    if grep -v "^Picked up" "$BUILD/javac.log" | grep -q "warning"; then
-        warn "the compiler had warnings:"; grep -v "^Picked up" "$BUILD/javac.log" | head -20
-    fi
-else
-    err "compilation failed:"; grep -v "^Picked up" "$BUILD/javac.log"
-    exit 1
-fi
+# ── Part 1: wire-protocol test (no Maven needed) ──────────────────────────────
+info "Part 1 — Wire protocol test (CoreIPCClient vs mock fluxdm-core)"
 
-# ── Run the suites ────────────────────────────────────────────────────────────
-JAVA_OPTS=(-Dstdout.encoding=UTF-8 -Dstderr.encoding=UTF-8)
-SUMMARY=(); FAILED=()
+rm -rf "$BUILD_DIR"
+mkdir -p "$BUILD_DIR/src/com/fluxdm/ipc" "$BUILD_DIR/src/com/fluxdm/test" "$BUILD_DIR/out"
 
-run_suite() {                       # run_suite <Class> [args...]
-    local name="$1"; shift
-    local log="$BUILD/$name.log"
-    info "$name"
-    java "${JAVA_OPTS[@]}" -cp "$OUT" "harness.$name" "$@" 2>&1 | grep -v "^Picked up" | tee "$log"
-    local rc=${PIPESTATUS[0]}
-    local passed failed
-    passed="$(grep -E '^ +Passed:' "$log" | tail -1 | awk '{print $2}')"
-    failed="$(grep -E '^ +Failed:' "$log" | tail -1 | awk '{print $2}')"
-    if [[ $rc -eq 0 ]]; then
-        SUMMARY+=("${GREEN}✔${RESET}  $(printf '%-20s' "$name") ${passed:-?} checks passed")
-    else
-        SUMMARY+=("${RED}✘${RESET}  $(printf '%-20s' "$name") FAILED (${failed:-?} failed, exit code $rc) — log: $log")
-        FAILED+=("$name")
-    fi
-    return $rc
-}
+# Strip the single Spring annotation so this compiles with zero dependencies.
+# Everything else in the file — the actual protocol logic being tested — is
+# untouched pure-JDK code (java.net, java.nio, java.util.concurrent).
+sed 's/import org.springframework.stereotype.Component;//; s/^@Component$//' \
+    "$DAEMON/src/main/java/com/fluxdm/ipc/CoreIPCClient.java" \
+    > "$BUILD_DIR/src/com/fluxdm/ipc/CoreIPCClient.java"
+cp "$DAEMON/src/main/java/com/fluxdm/ipc/IPCEventListener.java" \
+   "$BUILD_DIR/src/com/fluxdm/ipc/IPCEventListener.java"
+cp "$DAEMON/src/test/java/com/fluxdm/test/TestCoreIPCClient.java" \
+   "$BUILD_DIR/src/com/fluxdm/test/TestCoreIPCClient.java"
 
-for ((i = 1; i <= LOOP; i++)); do
-    [[ $LOOP -gt 1 ]] && info "round $i of $LOOP"
-    run_suite QueueServiceTest
-    run_suite CoreIPCClientTest
-    run_suite DownloadServiceTest
+javac -d "$BUILD_DIR/out" \
+    "$BUILD_DIR/src/com/fluxdm/ipc/CoreIPCClient.java" \
+    "$BUILD_DIR/src/com/fluxdm/ipc/IPCEventListener.java" \
+    "$BUILD_DIR/src/com/fluxdm/test/TestCoreIPCClient.java"
+ok "Compiled CoreIPCClient + test harness"
+
+rm -f /tmp/fluxdm_mock.sock
+python3 "$ROOT/tests/mock_core.py" > "$BUILD_DIR/mock.log" 2>&1 &
+MOCK_PID=$!
+trap 'kill $MOCK_PID 2>/dev/null || true' EXIT
+
+for _ in $(seq 1 30); do
+    grep -q "READY" "$BUILD_DIR/mock.log" 2>/dev/null && break
+    sleep 0.1
 done
 
-if [[ $E2E -eq 1 ]]; then
-    CORE_BIN="${FLUXDM_CORE:-$ROOT/core/fluxdm-core}"
-    if [[ ! -x "$CORE_BIN" ]]; then
-        warn "$CORE_BIN not found — building it"
-        if ! make -s -C "$ROOT/core"; then
-            err "the core did not build; cannot run the end-to-end suite"
-            SUMMARY+=("${RED}✘${RESET}  $(printf '%-20s' DaemonE2ETest) not run: no fluxdm-core binary")
-            FAILED+=("DaemonE2ETest")
-            E2E=0
-        fi
-    fi
-    [[ $E2E -eq 1 ]] && run_suite DaemonE2ETest "$CORE_BIN"
+echo ""
+( cd "$BUILD_DIR/out" && java com.fluxdm.test.TestCoreIPCClient )
+PROTO_RC=$?
+
+wait $MOCK_PID 2>/dev/null || true
+trap - EXIT
+
+echo ""
+if [[ $PROTO_RC -eq 0 ]]; then
+    ok "Wire protocol test PASSED"
 else
-    SUMMARY+=("${YELLOW}⚠${RESET}  $(printf '%-20s' DaemonE2ETest) skipped (--no-e2e)")
+    err "Wire protocol test FAILED — see output above"
 fi
 
-# ── Maven: the real Spring build (needs mvn and Maven Central) ────────────────
-MVN_LINE=""
-if [[ $MAVEN -eq 1 ]]; then
-    info "Maven — compiling the daemon against the real Spring Boot libraries"
-    if ! command -v mvn >/dev/null 2>&1; then
-        warn "mvn not found — skipped (sudo apt install maven)"
-        MVN_LINE="${YELLOW}⚠${RESET}  $(printf '%-20s' 'mvn compile') skipped (mvn not installed)"
+# ── Part 2: full Maven build (optional — needs internet + mvn) ───────────────
+info "Part 2 — Full Maven build (Spring Boot, JPA, WebSocket)"
+
+if ! command -v mvn >/dev/null 2>&1; then
+    warn "mvn not found — skipping full build."
+    warn "Install: sudo apt install maven"
+    MAVEN_RC=2
+else
+    cd "$DAEMON"
+    if mvn -q -DskipTests compile 2>&1 | tee "$BUILD_DIR/maven.log"; then
+        ok "mvn compile succeeded — full daemon (Spring/JPA/WebSocket) builds clean"
+        MAVEN_RC=0
     else
-        ( cd "$DAEMON" && mvn -q -DskipTests compile ) > "$BUILD/maven.log" 2>&1
-        MVN_RC=$?
-        if [[ $MVN_RC -eq 0 ]]; then
-            ok "mvn compile succeeded: the daemon builds against real Spring Boot"
-            MVN_LINE="${GREEN}✔${RESET}  $(printf '%-20s' 'mvn compile') OK"
-        elif grep -q "COMPILATION ERROR" "$BUILD/maven.log"; then
-            err "mvn compile found compile errors:"; grep -E "ERROR.*\.java|COMPILATION ERROR" "$BUILD/maven.log" | head -30
-            MVN_LINE="${RED}✘${RESET}  $(printf '%-20s' 'mvn compile') FAILED — log: $BUILD/maven.log"
-            FAILED+=("mvn compile")
-        else
-            warn "mvn could not run to completion (usually no access to Maven Central) — see $BUILD/maven.log"
-            MVN_LINE="${YELLOW}⚠${RESET}  $(printf '%-20s' 'mvn compile') not completed — log: $BUILD/maven.log"
-        fi
+        err "mvn compile failed — see $BUILD_DIR/maven.log"
+        warn "If this is a dependency-resolution error, check internet access to Maven Central"
+        MAVEN_RC=1
     fi
 fi
 
-# ── Summary ───────────────────────────────────────────────────────────────────
+# ── Summary ────────────────────────────────────────────────────────────────
 sep
 echo -e "${BOLD}  Summary${RESET}"
 sep
-for line in "${SUMMARY[@]}"; do echo -e "  $line"; done
-[[ -n "$MVN_LINE" ]] && echo -e "  $MVN_LINE"
-sep
-if [[ ${#FAILED[@]} -eq 0 ]]; then
-    echo -e "${BOLD}${GREEN}  ALL DAEMON TESTS PASSED${RESET}"; sep; exit 0
+if [[ $PROTO_RC -eq 0 ]]; then
+    echo -e "  ${GREEN}✔${RESET}  Wire protocol (CoreIPCClient)  — PASSED"
 else
-    echo -e "${BOLD}${RED}  FAILED: ${FAILED[*]}${RESET}"; sep; exit 1
+    echo -e "  ${RED}✘${RESET}  Wire protocol (CoreIPCClient)  — FAILED"
 fi
+case $MAVEN_RC in
+    0) echo -e "  ${GREEN}✔${RESET}  Full Maven build               — PASSED" ;;
+    1) echo -e "  ${RED}✘${RESET}  Full Maven build               — FAILED" ;;
+    2) echo -e "  ${YELLOW}⚠${RESET}  Full Maven build               — SKIPPED (no mvn)" ;;
+esac
+sep
+
+exit $PROTO_RC

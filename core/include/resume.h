@@ -31,10 +31,7 @@ typedef struct __attribute__((packed)) {
     uint64_t total_size;        /* 0 if unknown            */
     uint8_t  checksum_type;     /* 0=none 1=MD5 2=SHA256   */
     uint8_t  checksum[32];
-    uint64_t validator;         /* hash of the remote file's Last-Modified/ETag +
-                                 * size at download start; 0 = none (older files).
-                                 * A resume is refused if it no longer matches. */
-    uint8_t  _pad[63];
+    uint8_t  _pad[71];
     /* followed by: flux_resume_seg_t[num_segments]
      *              uint16_t url_len, char url[url_len]
      *              uint16_t path_len, char path[path_len]  */

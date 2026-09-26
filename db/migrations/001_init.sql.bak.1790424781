@@ -1,0 +1,3 @@
+-- FluxDM — 001_init.sql  (applied automatically on first run)
+-- Downloads table (per-segment persistence intentionally not included —
+-- see the note in db/schema.sql)

@@ -38,10 +38,9 @@ typedef struct __attribute__((packed)) {
     uint64_t total_bytes;
     uint64_t downloaded_bytes;
     uint32_t speed_bps;
-    uint32_t eta_seconds;       /* UINT32_MAX = unknown */
+    uint32_t eta_seconds;
     uint8_t  active_segments;
-    uint8_t  status;            /* flux_download_status_t (was padding) */
-    uint8_t  _pad[2];
+    uint8_t  _pad[3];
 } flux_rsp_progress_t;
 
 /* ── RSP_COMPLETE ─────────────────────────────────────────────────────────── */

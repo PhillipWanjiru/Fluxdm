@@ -1,0 +1,27 @@
+# FluxDM — application.properties
+server.port=7171
+server.address=127.0.0.1
+
+spring.datasource.url=jdbc:sqlite:${user.home}/.fluxdm/fluxdm.db
+spring.datasource.driver-class-name=org.sqlite.JDBC
+spring.jpa.database-platform=org.hibernate.community.dialect.SQLiteDialect
+spring.jpa.hibernate.ddl-auto=update
+
+logging.level.root=INFO
+logging.level.com.fluxdm=DEBUG
+
+# ── C core process management ────────────────────────────────────────────────
+# Path to the compiled fluxdm-core binary (see core/Makefile).
+fluxdm.core.binary-path=${user.home}/Desktop/fluxdm/core/fluxdm-core
+fluxdm.core.socket-path=/tmp/fluxdm.sock
+# Log level passed to fluxdm-core via --log (0=quiet 1=info 2=debug)
+fluxdm.core.log-level=1
+# How long to wait for the Unix socket to appear after spawning the process
+fluxdm.core.startup-timeout-ms=5000
+# Global bandwidth cap passed via --limit (0=unlimited)
+fluxdm.core.global-limit-bps=0
+
+# ── Queue / concurrency ───────────────────────────────────────────────────────
+# Downloads beyond this count wait in QueueService until a running one
+# finishes (success or error) and frees a slot.
+fluxdm.max-concurrent-downloads=4

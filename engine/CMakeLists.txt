@@ -47,13 +47,11 @@ set(C_CORE_SRCS
     ${C_CORE_DIR}/src/bandwidth.c
     ${C_CORE_DIR}/src/checksum.c
     ${C_CORE_DIR}/src/resume.c
-    ${C_CORE_DIR}/src/hostgate.c
     ${C_CORE_DIR}/src/connection.c
     ${C_CORE_DIR}/src/segment.c
     ${C_CORE_DIR}/src/downloader.c
     ${C_CORE_DIR}/src/protocol/http.c
     ${C_CORE_DIR}/src/protocol/https.c
-    ${C_CORE_DIR}/src/ipc/frame_io.c
     ${C_CORE_DIR}/src/ipc/socket_server.c
 )
 
@@ -104,9 +102,6 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../tests/test_engine.cpp")
     target_compile_options(test_engine PRIVATE
         ${DEBUG_FLAGS}
     )
-    # compiled with the sanitizers above, so it must be linked with them in every
-    # build type (a Release configuration used to fail with __ubsan_handle_* undefined)
-    target_link_options(test_engine PRIVATE -fsanitize=address,undefined)
     add_custom_target(run_tests
         COMMAND test_engine
         DEPENDS test_engine

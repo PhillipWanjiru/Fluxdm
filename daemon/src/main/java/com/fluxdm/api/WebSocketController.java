@@ -13,6 +13,7 @@
 package com.fluxdm.api;
 
 import com.fluxdm.ipc.CoreIPCClient;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.messaging.handler.annotation.DestinationVariable;
 import org.springframework.messaging.handler.annotation.MessageMapping;
 import org.springframework.stereotype.Controller;
@@ -20,22 +21,18 @@ import org.springframework.stereotype.Controller;
 @Controller
 public class WebSocketController {
 
-    private final CoreIPCClient ipcClient;
-
-    public WebSocketController(CoreIPCClient ipcClient) {
-        this.ipcClient = ipcClient;
-    }
+    @Autowired private CoreIPCClient ipcClient;
 
     /** Client sends to /app/status/{id} to request an immediate status push
      *  for one download; the reply arrives asynchronously on
-     *  /topic/downloads/{id} as a normal status message. */
+     *  /topic/downloads/{id} as a normal RSP_STATUS-derived message. */
     @MessageMapping("/status/{id}")
-    public void requestStatus(@DestinationVariable long id) {
+    public void requestStatus(@DestinationVariable int id) {
         ipcClient.requestStatus(id);
     }
 
     /** Client sends to /app/status-all to request a status push for every
-     *  download the core knows; replies arrive on /topic/downloads/{id} per item. */
+     *  active download; replies arrive on /topic/downloads/{id} per item. */
     @MessageMapping("/status-all")
     public void requestStatusAll() {
         ipcClient.requestStatusAll();

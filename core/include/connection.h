@@ -41,15 +41,7 @@ typedef struct flux_conn {
     char         host[256];
     uint16_t     port;
 
-    /* Optional pre-resolved peer address. When addr_len > 0 the connect
-     * goes straight to it and skips DNS entirely — the probe resolves the
-     * host once and every segment reuses the address that actually worked
-     * (which also avoids retrying a dead IPv6 address on every segment). */
-    struct sockaddr_storage addr;
-    socklen_t    addr_len;
-
-    /* Read buffer: bytes [rbuf_start, rbuf_end) are unread. Linear, compacted by
-     * flux_conn_fill() when it runs out of room at the end. */
+    /* Circular read buffer — avoids small heap allocations on hot path */
     uint8_t     *rbuf;
     size_t       rbuf_cap;
     size_t       rbuf_start;        /* read cursor                      */
@@ -72,9 +64,6 @@ typedef struct {
 
 /* Allocate a connection struct (does NOT connect yet). */
 flux_conn_t *flux_conn_new(const char *host, uint16_t port, int use_tls);
-
-/* Pin the peer address (skips getaddrinfo in flux_conn_start_connect). */
-void flux_conn_set_addr(flux_conn_t *c, const struct sockaddr *sa, socklen_t len);
 
 /* Initiate a non-blocking connect. Call flux_conn_finish_connect()
  * once epoll signals EPOLLOUT on the fd. Returns 0 on success. */
@@ -105,11 +94,11 @@ ssize_t flux_conn_send(flux_conn_t *c, const void *buf, size_t len);
  * Returns 0 on clean EOF. May return FLUX_ERR_WOULDBLOCK. */
 ssize_t flux_conn_recv(flux_conn_t *c, void *buf, size_t len);
 
-/* Fill the internal read buffer from the socket (call on EPOLLIN).
+/* Fill the internal ring buffer from the socket (call on EPOLLIN).
  * Returns bytes buffered, 0 on EOF, -1 on error. */
 ssize_t flux_conn_fill(flux_conn_t *c);
 
-/* Read from the buffer without touching the socket.
+/* Read from the ring buffer without touching the socket.
  * Returns bytes consumed. */
 size_t flux_conn_drain(flux_conn_t *c, void *buf, size_t len);
 
