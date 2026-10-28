@@ -1,0 +1,28 @@
+# FluxDM — .gitattributes
+# Normalise line endings in the repository (LF), whatever the checkout platform does.
+* text=auto eol=lf
+
+# Scripts must stay LF or the shebang line breaks.
+*.sh   text eol=lf
+*.py   text eol=lf
+Makefile text eol=lf
+
+# Binary assets: never diff or merge them as text.
+*.png  binary
+*.ico  binary
+*.jar  binary
+*.zip  binary
+
+# Better hunk headers in `git diff` / GitHub: show the enclosing function or class.
+*.c    diff=cpp
+*.h    diff=cpp
+*.cpp  diff=cpp
+*.hpp  diff=cpp
+*.java diff=java
+*.py   diff=python
+*.md   diff=markdown
+
+# GitHub's language statistics: count the project's own code, not the Spring stand-ins used to
+# compile the daemon's tests without Maven, and not the documentation.
+tests/java/stubs/** linguist-vendored
+docs/**             linguist-documentation

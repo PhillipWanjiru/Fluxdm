@@ -1,0 +1,62 @@
+# FluxDM — what stays out of version control: build output, local state, editor noise.
+# Everything that is *source* (core/, daemon/, tests/ ...) is tracked.
+
+# ── C core and C++ engine build output ───────────────────────────────────────
+/core/build/
+/core/build_asan/
+/core/build_tsan/
+/core/fluxdm-core
+/core/fluxdm-core-asan
+/core/fluxdm-core-tsan
+/engine/build/
+*.o
+*.d
+*.a
+
+# ── Test binaries and scratch directories (rebuilt by tests/Makefile and run_*.sh)
+/tests/test_unit
+/tests/test_unit_io
+/tests/test_unit_net
+/tests/test_engine
+/tests/.daemon_build/
+/tests/.engine_build/
+
+# ── Java daemon ──────────────────────────────────────────────────────────────
+/daemon/target/
+*.class
+*.jar
+
+# ── Python ───────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# ── Node (ui/, extension/) ───────────────────────────────────────────────────
+node_modules/
+/ui/build/
+/ui/dist/
+
+# ── Local state: never commit these ──────────────────────────────────────────
+# copies of the files fluxdm_update.sh replaced
+/.update_backup/
+# resume checkpoints of unfinished downloads
+*.fluxpart
+*.log
+*.sqlite
+*.db
+.env
+.env.*
+# leftovers of patches and updates
+*.orig
+*.rej
+*.bak
+*.old_pre_rewrite
+
+# ── Editors, OS ──────────────────────────────────────────────────────────────
+.idea/
+.vscode/
+*.swp
+*~
+.DS_Store
+Thumbs.db
