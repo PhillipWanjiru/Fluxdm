@@ -1,0 +1,118 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- FluxDM — daemon/pom.xml
+     Maven build for the Java daemon (Phase 3): REST API, WebSocket,
+     SQLite persistence, scheduler, and the IPC bridge to fluxdm-core.
+
+     The daemon's logic is tested WITHOUT Maven by tests/run_daemon_tests.sh:
+     it compiles daemon/src/main against tiny stand-ins for the Spring types
+     (tests/java/stubs) and runs the real service classes against a scripted
+     fake core and against the real fluxdm-core binary. Those tests are kept
+     out of src/test on purpose, so `mvn package` neither compiles nor runs
+     them. What they cannot show is how Spring itself wires and runs the
+     daemon (beans, JPA/SQLite, REST mappings, WebSocket): that is checked by
+     `mvn package` and by starting the daemon (dev_start.sh). -->
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0
+                              https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-starter-parent</artifactId>
+        <version>3.2.5</version>
+        <relativePath/>
+    </parent>
+
+    <groupId>com.fluxdm</groupId>
+    <artifactId>fluxdm-daemon</artifactId>
+    <version>0.1.0</version>
+    <name>fluxdm-daemon</name>
+    <description>FluxDM Java daemon — REST API, WebSocket, scheduler, IPC bridge</description>
+
+    <properties>
+        <java.version>21</java.version>
+        <maven.compiler.source>21</maven.compiler.source>
+        <maven.compiler.target>21</maven.compiler.target>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <sqlite-jdbc.version>3.45.3.0</sqlite-jdbc.version>
+    </properties>
+
+    <dependencies>
+        <!-- REST API -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-web</artifactId>
+        </dependency>
+
+        <!-- WebSocket / STOMP for live progress push to the UI -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-websocket</artifactId>
+        </dependency>
+
+        <!-- JPA / Hibernate ORM -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-data-jpa</artifactId>
+        </dependency>
+
+        <!-- SQLite JDBC driver -->
+        <dependency>
+            <groupId>org.xerial</groupId>
+            <artifactId>sqlite-jdbc</artifactId>
+            <version>${sqlite-jdbc.version}</version>
+        </dependency>
+
+        <!-- Hibernate community dialects (includes SQLiteDialect).
+             Version intentionally left unpinned here and instead
+             matched to Spring Boot's managed Hibernate version via
+             the ${hibernate.version} property that spring-boot-
+             dependencies exposes, so it can never drift out of sync
+             with spring-boot-starter-data-jpa's own Hibernate. -->
+        <dependency>
+            <groupId>org.hibernate.orm</groupId>
+            <artifactId>hibernate-community-dialects</artifactId>
+            <version>${hibernate.version}</version>
+        </dependency>
+
+        <!-- Scheduling (@Scheduled) — included in spring-boot-starter,
+             kept explicit here for clarity since SchedulerService relies on it -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter</artifactId>
+        </dependency>
+
+        <!-- Validation for @RequestBody DTOs -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-validation</artifactId>
+        </dependency>
+
+        <!-- Test scope -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <finalName>fluxdm-daemon</finalName>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <configuration>
+                    <source>21</source>
+                    <target>21</target>
+                    <release combine.self="override"></release>
+                </configuration>
+            </plugin>
+            <plugin>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-maven-plugin</artifactId>
+            </plugin>
+        </plugins>
+    </build>
+</project>

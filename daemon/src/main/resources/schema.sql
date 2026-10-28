@@ -1,0 +1,2 @@
+-- FluxDM — daemon schema (auto-applied by Spring on startup)
+-- Primary schema lives in db/schema.sql — keep these in sync.
