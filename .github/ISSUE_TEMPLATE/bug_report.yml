@@ -1,0 +1,78 @@
+name: Bug report
+description: Something does not work, or does not match the documentation
+title: "bug: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time. A report that can be reproduced is a report that can be fixed.
+
+        **Security problems do not belong here.** Use
+        [private vulnerability reporting](https://github.com/PhillipWanjiru/Fluxdm/security/advisories/new).
+  - type: dropdown
+    id: component
+    attributes:
+      label: Component
+      description: Where do you think the problem is?
+      options:
+        - Core (C code in core/)
+        - IPC protocol (ipc/)
+        - Daemon (Java code in daemon/)
+        - Tests or CI
+        - Documentation
+        - Prototype (desktop UI / browser extension / video grabber)
+        - Not sure
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: Output of `fluxdm-core --version`, or the commit hash you built (`git rev-parse --short HEAD`).
+      placeholder: fluxdm-core 0.1.0
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      description: Distribution, compiler, JDK, anything unusual about the network or the file system.
+      placeholder: Ubuntu 24.04, gcc 13.3, OpenJDK 21, ext4
+    validations:
+      required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What did you see, and what did you expect to see instead?
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: How can it be reproduced?
+      description: |
+        The shortest steps that show the problem. For a transfer problem, the kind of server matters more
+        than its name: does it support `Range`, does it limit connections, is it HTTPS, does it redirect?
+        Please do not include URLs with credentials or signed query strings.
+      placeholder: |
+        1. Start the core: fluxdm-core --sock /tmp/test.sock
+        2. ...
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: The core's output (`--log 2` is the most verbose), the daemon's log, or a sanitizer report. It is rendered as code.
+      render: shell
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I searched the existing issues and this is not a duplicate.
+          required: true
+        - label: This is not a security vulnerability (those go through private reporting).
+          required: true

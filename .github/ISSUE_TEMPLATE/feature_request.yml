@@ -1,0 +1,53 @@
+name: Feature request
+description: Propose a change or an addition
+title: "feat: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please read the [roadmap](https://github.com/PhillipWanjiru/Fluxdm/blob/main/docs/ROADMAP.md) first;
+        the idea may already be planned, or ruled out for a reason written there.
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem does this solve?
+      description: Describe the situation, not the solution. What are you trying to do, and what gets in the way?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What would you like to happen?
+      description: The behaviour you propose. For anything that touches the IPC protocol, say what a client would send and receive.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: What else did you consider?
+      description: Other designs, workarounds, and why they are not enough.
+  - type: dropdown
+    id: component
+    attributes:
+      label: Component
+      options:
+        - Core (C code in core/)
+        - IPC protocol (ipc/)
+        - Daemon (Java code in daemon/)
+        - Tests or CI
+        - Documentation
+        - Prototype (desktop UI / browser extension / video grabber)
+        - Not sure
+    validations:
+      required: true
+  - type: dropdown
+    id: contribute
+    attributes:
+      label: Would you implement it?
+      options:
+        - "Yes - I would open a pull request"
+        - "Maybe - with some guidance"
+        - "No - I am only suggesting it"
+    validations:
+      required: true

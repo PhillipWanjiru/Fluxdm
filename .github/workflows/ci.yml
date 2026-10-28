@@ -1,0 +1,133 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# A newer push to the same branch or pull request makes the older run pointless.
+# Runs on main are never cancelled, so every commit on main keeps its own result.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  # Fast checks first: they fail in seconds and need no toolchain.
+  hygiene:
+    name: hygiene
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install ShellCheck if the runner image lacks it
+        run: command -v shellcheck >/dev/null || { sudo apt-get update -q && sudo apt-get install -y -q shellcheck; }
+
+      - name: ShellCheck
+        run: shellcheck -S warning dev_start.sh tests/*.sh .githooks/commit-msg .githooks/pre-commit .github/scripts/*.sh
+
+      - name: Git hooks behave as documented
+        run: bash .github/scripts/test-hooks.sh
+
+      - name: Commit messages follow Conventional Commits
+        env:
+          BASE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+          HEAD_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+        run: bash .github/scripts/check-commits.sh "$BASE_SHA" "$HEAD_SHA"
+
+  core:
+    name: core
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: sudo apt-get update -q && sudo apt-get install -y -q --no-install-recommends build-essential libssl-dev openssl python3
+
+      - name: Build the core
+        run: make -C core
+
+      - name: Unit, integration and behaviour suites
+        run: bash tests/run_all.sh --quick
+
+  core-sanitizers:
+    name: core-sanitizers (${{ matrix.name }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: ASan + UBSan
+            target: debug
+          - name: TSan
+            target: tsan
+    env:
+      # A sanitizer report must fail the run, not scroll past in a log.
+      ASAN_OPTIONS: detect_leaks=1:abort_on_error=0:halt_on_error=1
+      UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+      TSAN_OPTIONS: halt_on_error=1:second_deadlock_stack=1
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: sudo apt-get update -q && sudo apt-get install -y -q --no-install-recommends build-essential libssl-dev openssl python3
+
+      # ThreadSanitizer cannot map its shadow memory under the runner's default
+      # 32-bit address-space randomisation (a known toolchain limitation).
+      - name: Lower address-space randomisation for ThreadSanitizer
+        if: matrix.target == 'tsan'
+        run: sudo sysctl -w vm.mmap_rnd_bits=28
+
+      - name: Build the core (${{ matrix.name }})
+        run: make -C core ${{ matrix.target }}
+
+      - name: Integration suite against the sanitized core
+        run: python3 tests/test_integration.py
+
+  daemon:
+    name: daemon
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+          cache-dependency-path: daemon/pom.xml
+
+      - name: Install build dependencies (the end-to-end suite runs the real core)
+        run: sudo apt-get update -q && sudo apt-get install -y -q --no-install-recommends build-essential libssl-dev
+
+      - name: Build the core
+        run: make -C core
+
+      # Compiles the daemon against the real Spring Boot libraries and builds the jar.
+      - name: Maven package
+        run: mvn -B -ntp -f daemon/pom.xml -DskipTests package
+
+      - name: Java suites (scripted fake core, then the real core)
+        run: bash tests/run_daemon_tests.sh --no-maven
+
+  engine:
+    name: engine
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: sudo apt-get update -q && sudo apt-get install -y -q --no-install-recommends build-essential libssl-dev pkg-config
+
+      - name: Build and run the C++ engine tests
+        run: bash tests/run_engine_tests.sh
