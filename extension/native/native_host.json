@@ -1,0 +1,3 @@
+{"name":"com.fluxdm.host","description":"FluxDM native host",
+"path":"/usr/local/bin/fluxdm-native-host","type":"stdio",
+"allowed_origins":["chrome-extension://EXTENSION_ID/"]}
