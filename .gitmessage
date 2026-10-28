@@ -1,0 +1,14 @@
+
+# <type>(<scope>): <subject>
+#   imperative mood, at most 72 characters, no trailing period
+#
+# Why is this change needed? What was wrong or missing?     (wrap at 72)
+#
+# How does it work? What did you consider and reject?
+#
+# Tests: what covers this change?
+#
+# Footers:  Fixes #123  |  Refs #45  |  BREAKING CHANGE: <what breaks and how to migrate>
+#
+# Types : feat fix docs style refactor perf test build ci chore revert
+# Scopes: core ipc daemon engine grabber extension ui tests db config build ci docs

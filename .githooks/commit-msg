@@ -1,0 +1,68 @@
+#!/usr/bin/env bash
+# FluxDM — .githooks/commit-msg
+#
+# Enforces Conventional Commits (https://www.conventionalcommits.org/) on the subject line:
+#
+#     <type>(<scope>)!: <subject>          scope and "!" are optional
+#
+#   types : feat fix docs style refactor perf test build ci chore revert
+#   rules : subject starts with a non-space, has no trailing period, subject line <= 72
+#           characters, and a blank line separates it from the body.
+#
+# Merge commits and the messages git generates for revert/fixup/squash/amend are let through.
+# Enable with:  git config core.hooksPath .githooks        Bypass once with:  git commit --no-verify
+set -euo pipefail
+
+msg_file="${1:?usage: commit-msg <message-file>}"
+
+# The message as git will record it: comment lines dropped, leading blank lines dropped.
+message="$(sed -e '/^[[:space:]]*#/d' "$msg_file" | sed -e '/./,$!d')"
+subject="$(printf '%s\n' "$message" | sed -n '1p')"
+second="$(printf '%s\n' "$message" | sed -n '2p')"
+
+case "$subject" in
+    "Merge "*|"Revert \""*|"fixup! "*|"squash! "*|"amend! "*) exit 0 ;;
+esac
+
+types='feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert'
+errors=()
+
+if [[ -z "$subject" ]]; then
+    errors+=("the commit message is empty")
+else
+    if ! printf '%s\n' "$subject" | grep -Eq "^(${types})(\\([a-z0-9][a-z0-9._/-]*\\))?!?: [^[:space:]]"; then
+        errors+=("the subject must look like  <type>(<scope>): <subject>  with type one of: ${types//|/ }")
+    fi
+    if [[ "${subject: -1}" == "." ]]; then
+        errors+=("the subject must not end with a period")
+    fi
+    length="$(printf '%s' "$subject" | wc -m | tr -d ' ')"
+    if (( length > 72 )); then
+        errors+=("the subject is ${length} characters long; keep it to 72 or fewer")
+    fi
+    if [[ -n "$second" ]]; then
+        errors+=("leave a blank line between the subject and the body")
+    fi
+fi
+
+if (( ${#errors[@]} == 0 )); then
+    exit 0
+fi
+
+{
+    echo
+    echo "  ✘ commit message rejected:"
+    printf '      - %s\n' "${errors[@]}"
+    echo
+    echo "  Your subject:  ${subject:-<empty>}"
+    echo
+    echo "  Examples:"
+    echo "      feat(daemon): add a scheduler endpoint for repeating resumes"
+    echo "      fix(core): stop counting an adopted probe connection twice"
+    echo "      docs: describe the IPC back-pressure limits"
+    echo "      feat(ipc)!: widen the progress frame   (breaking change: add a BREAKING CHANGE: footer)"
+    echo
+    echo "  See CONTRIBUTING.md. Bypass once with: git commit --no-verify"
+    echo
+} >&2
+exit 1

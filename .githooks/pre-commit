@@ -1,0 +1,87 @@
+#!/usr/bin/env bash
+# FluxDM — .githooks/pre-commit
+#
+# Fast checks on exactly what is about to be committed:
+#   1. no staged file larger than 5 MiB           (override once: FLUXDM_ALLOW_LARGE=1 git commit)
+#   2. no leftover merge-conflict markers          (Markdown files are exempt: they use "=======" rules)
+#   3. no private keys and no well-known access tokens
+#
+# Only lines being *added* are inspected, so an old line elsewhere in a file never blocks an unrelated change.
+# Enable with:  git config core.hooksPath .githooks        Bypass once with:  git commit --no-verify
+set -euo pipefail
+
+max_bytes=$((5 * 1024 * 1024))
+failed=0
+
+report() {            # report <title> <detail>...
+    local title="$1"
+    shift
+    {
+        echo
+        echo "  ✘ ${title}"
+        printf '      %s\n' "$@"
+    } >&2
+    failed=1
+}
+
+# files_with_added <ere> [skip-glob]
+#   Names the staged files that have an added line matching <ere>, skipping names that match <skip-glob>.
+#   In a diff an added line starts with "+", so write <ere> against that: '^\+<marker>' for a line that
+#   starts with <marker>, '^\+.*<token>' for a line that contains <token>.
+files_with_added() {
+    local re="$1" skip="${2:-}" file
+    while IFS= read -r -d '' file; do
+        if [[ -n "$skip" ]]; then
+            # shellcheck disable=SC2254  # the glob is meant to be expanded
+            case "$file" in $skip) continue ;; esac
+        fi
+        if git diff --cached -U0 --no-color -- "$file" | grep -Eq -e "$re"; then
+            printf '%s\n' "$file"
+        fi
+    done < <(git diff --cached --name-only --diff-filter=ACMR -z)
+}
+
+# ── 1. file size ─────────────────────────────────────────────────────────────
+if [[ "${FLUXDM_ALLOW_LARGE:-0}" != "1" ]]; then
+    big=()
+    while IFS= read -r -d '' file; do
+        size="$(git cat-file -s ":${file}" 2>/dev/null || echo 0)"
+        if ((size > max_bytes)); then
+            big+=("${file}  ($((size / 1024 / 1024)) MiB)")
+        fi
+    done < <(git diff --cached --name-only --diff-filter=ACMR -z)
+    if ((${#big[@]} > 0)); then
+        report "files larger than 5 MiB are not committed (build output, archives and media do not belong in git):" \
+            "${big[@]}" \
+            "If a file really belongs here:  FLUXDM_ALLOW_LARGE=1 git commit"
+    fi
+fi
+
+# ── 2. conflict markers ──────────────────────────────────────────────────────
+mapfile -t conflicted < <(files_with_added '^\+(<<<<<<<|>>>>>>>)( |$)' '*.md')
+if ((${#conflicted[@]} > 0)); then
+    report "merge-conflict markers in the staged changes:" "${conflicted[@]}"
+fi
+
+# ── 3. secrets ───────────────────────────────────────────────────────────────
+secret_re='-----BEGIN [A-Z ]*PRIVATE KEY-----'
+secret_re+='|gh[pousr]_[A-Za-z0-9]{36}'
+secret_re+='|github_pat_[A-Za-z0-9_]{22,}'
+secret_re+='|AKIA[0-9A-Z]{16}'
+secret_re+='|xox[baprs]-[A-Za-z0-9-]{10,}'
+secret_re+='|AIza[0-9A-Za-z_-]{35}'
+mapfile -t leaking < <(files_with_added "^\\+.*(${secret_re})")
+if ((${#leaking[@]} > 0)); then
+    report "these files add what looks like a private key or an access token (the match is not printed, to keep it out of your terminal history):" \
+        "${leaking[@]}" \
+        "Remove it, revoke it if it was ever real, and read it from an environment variable or an ignored .env file instead."
+fi
+
+if ((failed)); then
+    {
+        echo
+        echo "  Bypass once with:  git commit --no-verify"
+        echo
+    } >&2
+    exit 1
+fi
