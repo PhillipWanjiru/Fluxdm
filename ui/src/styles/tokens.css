@@ -1,0 +1,6 @@
+:root {
+  --bg-base:#0a0a0a;--bg-panel:#0d0d0d;--bg-hover:#141414;--border:#1a1a1a;
+  --text-main:#ccc;--text-dim:#666;--green:#4af48a;--blue:#4ab3f4;
+  --amber:#f4c44a;--red:#f44a4a;--purple:#9a8af4;
+  --font-mono:"JetBrains Mono","Fira Code",monospace;
+}

@@ -1,0 +1,3 @@
+@import "./tokens.css";
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
+body{background:var(--bg-base);color:var(--text-main);font-family:var(--font-mono);font-size:12px;}
