@@ -22,9 +22,13 @@ describes what those files do.
 ## Transport
 
 - A Unix-domain stream socket (`AF_UNIX`, `SOCK_STREAM`), created with mode **`0600`**.
-- Default path `/tmp/fluxdm.sock` (`FLUX_IPC_SOCK_PATH`); override with `fluxdm-core --sock <path>`. The
-  daemon uses `/tmp/fluxdm-<user>.sock` and passes it to the core, so the two always agree. The path
-  must be shorter than 108 bytes (`sizeof(sockaddr_un.sun_path)`).
+- Without `--sock` the core listens on `$XDG_RUNTIME_DIR/fluxdm/core.sock`, or on
+  `~/.fluxdm/run/core.sock` when `$XDG_RUNTIME_DIR` is not an absolute path to a directory of yours that
+  is closed to others. The directory is created with mode `0700`; one of yours that is too open is closed
+  again, and a symbolic link or somebody else's directory is refused. There is no default under `/tmp`:
+  another user could create a socket there first and answer whoever connects. Override with
+  `fluxdm-core --sock <path>`. The daemon picks the same default and always passes the path to the core,
+  so the two agree. The path must be shorter than 108 bytes (`sizeof(sockaddr_un.sun_path)`).
 - The server refuses to take over a socket that a live process is serving, replaces a stale socket
   file left by a crash, and never deletes a path that is not a socket.
 - Up to **16** clients at once (`FLUX_IPC_MAX_CLIENTS`). A 17th connection is closed immediately.

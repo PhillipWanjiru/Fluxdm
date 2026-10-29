@@ -54,6 +54,7 @@ set(C_CORE_SRCS
     ${C_CORE_DIR}/src/protocol/http.c
     ${C_CORE_DIR}/src/protocol/https.c
     ${C_CORE_DIR}/src/ipc/frame_io.c
+    ${C_CORE_DIR}/src/ipc/sock_path.c
     ${C_CORE_DIR}/src/ipc/socket_server.c
 )
 

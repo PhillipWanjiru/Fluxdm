@@ -45,8 +45,9 @@ done
 gcc $CFLAGS $INCLUDES -c "$ROOT/core/src/protocol/http.c"       -o "$BUILD_DIR/core/http.o"
 gcc $CFLAGS $INCLUDES -c "$ROOT/core/src/protocol/https.c"      -o "$BUILD_DIR/core/https.o"
 gcc $CFLAGS $INCLUDES -c "$ROOT/core/src/ipc/frame_io.c"        -o "$BUILD_DIR/core/frame_io.o"
+gcc $CFLAGS $INCLUDES -c "$ROOT/core/src/ipc/sock_path.c"       -o "$BUILD_DIR/core/sock_path.o"
 gcc $CFLAGS $INCLUDES -c "$ROOT/core/src/ipc/socket_server.c"   -o "$BUILD_DIR/core/socket_server.o"
-echo "  CC  protocol/http.c, protocol/https.c, ipc/frame_io.c, ipc/socket_server.c"
+echo "  CC  protocol/http.c, protocol/https.c, ipc/frame_io.c, ipc/sock_path.c, ipc/socket_server.c"
 ok "C core compiled"
 
 # ── Compile C++ engine ────────────────────────────────────────────────────────

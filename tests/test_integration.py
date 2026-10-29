@@ -13,8 +13,11 @@ By default the binary is  <project>/core/fluxdm-core  (relative to this file).
 """
 import hashlib
 import os
+import shutil
 import stat
+import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -158,6 +161,48 @@ def test_status_all():
     c.close()
 
 
+def test_default_socket():
+    info("Test 9 — Without --sock the core listens inside a private directory")
+    home = Path(tempfile.mkdtemp(prefix="fxh", dir="/tmp"))            # short: sun_path is 108 bytes
+    xdg = home / "run"
+    xdg.mkdir()
+    os.chmod(xdg, 0o700)
+    cases = [("with XDG_RUNTIME_DIR", {"XDG_RUNTIME_DIR": str(xdg), "HOME": str(home)}, xdg / "fluxdm"),
+             ("without XDG_RUNTIME_DIR", {"HOME": str(home)}, home / ".fluxdm" / "run")]
+    try:
+        for label, extra, run_dir in cases:
+            env = {k: v for k, v in os.environ.items() if k != "XDG_RUNTIME_DIR"}
+            env.update(extra)
+            sock = run_dir / "core.sock"
+            proc = subprocess.Popen([CORE.binary, "--log", "0"], env=env,
+                                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            try:
+                up = False
+                for _ in range(200):
+                    if sock.exists() or proc.poll() is not None:
+                        break
+                    time.sleep(0.05)
+                up = sock.exists() and proc.poll() is None
+                expect(up, f"{label}: the socket appears at {sock.relative_to(home)}")
+                if up:
+                    expect(stat.S_IMODE(os.stat(run_dir).st_mode) == 0o700, f"{label}: its directory is private")
+                    expect(stat.S_IMODE(os.stat(sock).st_mode) == 0o600, f"{label}: the socket is private")
+                    c = Conn(str(sock))
+                    expect(c.status_all() is not None, f"{label}: the core answers on it")
+                    c.close()
+            finally:
+                if proc.poll() is None:
+                    proc.terminate()
+                try:
+                    proc.wait(timeout=10)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+                    proc.wait()
+            expect(not sock.exists(), f"{label}: the socket is removed when the core stops")
+    finally:
+        shutil.rmtree(home, ignore_errors=True)
+
+
 # ── Main ──────────────────────────────────────────────────────────────────────
 def main():
     global SITE
@@ -170,7 +215,8 @@ def main():
             warn("Skipping the remaining tests — the core did not start.")
             return 1
         tests = [test_ipc_connect, test_simple_download, test_status_command,
-                 test_progress_frames, test_set_limit, test_cancel, test_status_all]
+                 test_progress_frames, test_set_limit, test_cancel, test_status_all,
+                 test_default_socket]
         def finish():
             rc = CORE.stop()
             expect(rc == 0, f"Core exits cleanly on shutdown (exit code {rc})", CORE.log_text())

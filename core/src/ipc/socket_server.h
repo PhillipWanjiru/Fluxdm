@@ -31,7 +31,6 @@
 #include <stddef.h>
 
 /* ── Configuration ────────────────────────────────────────────────────────── */
-#define FLUX_IPC_SOCK_PATH      "/tmp/fluxdm.sock"
 #define FLUX_IPC_BACKLOG        8
 #define FLUX_IPC_MAX_CLIENTS    16
 #define FLUX_IPC_OUT_SOFT       (256u * 1024u)        /* queued bytes above which progress frames are dropped */
@@ -72,9 +71,10 @@ typedef struct flux_ipc_server {
 
 /* ── Lifecycle ────────────────────────────────────────────────────────────── */
 
-/* Create the listening socket at `sock_path` (NULL = FLUX_IPC_SOCK_PATH, mode
- * 0600). Refuses to take over a socket that a live process is serving; a stale
- * socket file from a crashed run is replaced. 0 on success, -1 (error set). */
+/* Create the listening socket at `sock_path` (NULL = the private default from
+ * sock_path.h, mode 0600). Refuses to take over a socket that a live process is
+ * serving; a stale socket file from a crashed run is replaced. 0 on success,
+ * -1 (error set). */
 int  flux_ipc_server_init(flux_ipc_server_t *srv, flux_registry_t *reg, const char *sock_path);
 
 /* Serve clients until flux_ipc_stop() or CMD_SHUTDOWN. 0 on a clean stop. */

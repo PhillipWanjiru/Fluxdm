@@ -36,6 +36,7 @@ SRCS := \
 	$(PROTO_SRC)/http.c        \
 	$(PROTO_SRC)/https.c       \
 	$(IPC_SRC)/frame_io.c      \
+	$(IPC_SRC)/sock_path.c     \
 	$(IPC_SRC)/socket_server.c
 
 OBJS := $(patsubst %.c,$(BUILD_DIR)/%.o,$(SRCS))
