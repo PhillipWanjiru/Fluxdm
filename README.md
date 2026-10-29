@@ -164,12 +164,12 @@ Errors come back as `{"error": "..."}` with a fitting status (400, 404, 409, 503
 ```bash
 make -C core
 core/fluxdm-core --help
-core/fluxdm-core --sock /tmp/fluxdm.sock --limit 0 --log 1 --patience 300
+core/fluxdm-core --limit 0 --log 1 --patience 300
 ```
 
 | Option | Meaning |
 |---|---|
-| `--sock <path>` | Unix socket to listen on (mode `0600`) |
+| `--sock <path>` | Unix socket to listen on (mode `0600`). Default: `$XDG_RUNTIME_DIR/fluxdm/core.sock`, else `~/.fluxdm/run/core.sock`; the directory is created private |
 | `--limit <bytes/s>` | Global bandwidth cap, `0` = unlimited |
 | `--log <0\|1\|2>` | Quiet, info, debug |
 | `--patience <s>` | How long a download keeps waiting for a server that answers `429`/`503` while it serves none of our connections (default 300) |

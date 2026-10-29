@@ -1,7 +1,7 @@
 # FluxDM — tests/Makefile
 #
 #   make unit          build test_unit     (errors, bandwidth, checksum, resume, http, host gate ...)
-#   make unit-io       build test_unit_io  (URL handling, HTTP head parser, IPC framing)
+#   make unit-io       build test_unit_io  (URL handling, HTTP head parser, IPC framing, default socket path)
 #   make unit-net      build test_unit_net (the same layers from another angle, plus the limiter's burst depth)
 #   make run-unit      build and run all three unit suites
 #   make integration   smoke tests against a private core instance (needs ../core/fluxdm-core)
@@ -33,7 +33,8 @@ IO_SRCS := test_unit_io.c \
         ../core/src/protocol/http.c \
         ../core/src/protocol/https.c \
         ../core/src/connection.c \
-        ../core/src/ipc/frame_io.c
+        ../core/src/ipc/frame_io.c \
+        ../core/src/ipc/sock_path.c
 
 NET_SRCS := test_unit_net.c \
         ../core/src/errors.c \
@@ -52,7 +53,7 @@ unit: $(SRCS)
 	@$(CC) $(CFLAGS) -o test_unit $(SRCS) $(LDFLAGS)
 	@echo "  ✔  Built test_unit (ASan + UBSan enabled)"
 
-unit-io: $(IO_SRCS) ../core/src/ipc/frame_io.h
+unit-io: $(IO_SRCS) ../core/src/ipc/frame_io.h ../core/src/ipc/sock_path.h
 	@echo "  CC  test_unit_io"
 	@$(CC) $(CFLAGS) -o test_unit_io $(IO_SRCS) $(LDFLAGS)
 	@echo "  ✔  Built test_unit_io (ASan + UBSan enabled)"

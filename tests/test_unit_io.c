@@ -1,21 +1,25 @@
 /* FluxDM — tests/test_unit_io.c
  * Unit tests for the byte-level layers of the core: URL handling, request
- * building, response-head parsing and the IPC frame reader / encoder.
- * None of these touch the network.
+ * building, response-head parsing, the IPC frame reader / encoder and the choice
+ * of the default socket path. None of these touch the network.
  *
  * Build:  cd tests && make unit-io
  * Run:    ./test_unit_io
  */
 
+#include <ftw.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
+#include <sys/stat.h>
+#include <unistd.h>
 
 #include "../core/include/errors.h"
 #include "../core/include/connection.h"
 #include "../core/include/protocol/http.h"
 #include "../core/src/ipc/frame_io.h"
+#include "../core/src/ipc/sock_path.h"
 #include "../ipc/protocol.h"
 #include "../ipc/messages.h"
 
@@ -623,8 +627,136 @@ static void test_wire_layout(void) {
     EXPECT_EQ(FLUX_FLAG_EVENT, 1);
 }
 
+/* ── Default socket path ──────────────────────────────────────────────────── */
+static int rm_entry(const char *path, const struct stat *sb, int type, struct FTW *ftw) {
+    (void)sb; (void)type; (void)ftw;
+    return remove(path);
+}
+static void rm_rf(const char *path) { nftw(path, rm_entry, 16, FTW_DEPTH | FTW_PHYS); }
+
+static void make_dir(const char *path, mode_t mode) {
+    mkdir(path, mode);
+    chmod(path, mode);                                   /* the umask must not get a say */
+}
+
+static int mode_of(const char *path) {
+    struct stat sb;
+    return lstat(path, &sb) == 0 ? (int)(sb.st_mode & 07777) : -1;
+}
+
+static const char *err_has(const char *needle) { return strstr(flux_last_error_str(), needle); }
+
+static void test_sock_path(void) {
+    SUITE("default socket path (a private directory, never /tmp)");
+    int old_level = flux_log_level();
+    flux_log_set_level(0);                               /* the "not usable" notice is expected below */
+
+    char root[] = "/tmp/fxsp_XXXXXX";
+    if (!mkdtemp(root)) { EXPECT(0); return; }
+    char p[1024], q[1024], out[108];
+
+    /* a private XDG_RUNTIME_DIR: the socket goes in <it>/fluxdm */
+    snprintf(p, sizeof(p), "%s/run", root);          make_dir(p, 0700);
+    EXPECT_EQ(flux_ipc_resolve_sock_path(p, "/nonexistent", out, sizeof(out)), 0);
+    snprintf(q, sizeof(q), "%s/run/fluxdm/core.sock", root);
+    EXPECT_STR(out, q);
+    snprintf(q, sizeof(q), "%s/run/fluxdm", root);
+    EXPECT_EQ(mode_of(q), 0700);
+    EXPECT_EQ(flux_ipc_resolve_sock_path(p, "/nonexistent", out, sizeof(out)), 0);   /* and again: nothing to create */
+
+    /* a directory of ours that is too open is closed again */
+    snprintf(p, sizeof(p), "%s/run2", root);         make_dir(p, 0700);
+    snprintf(q, sizeof(q), "%s/run2/fluxdm", root);  make_dir(q, 0777);
+    EXPECT_EQ(flux_ipc_resolve_sock_path(p, "/nonexistent", out, sizeof(out)), 0);
+    EXPECT_EQ(mode_of(q), 0700);
+
+    /* a symbolic link is refused, and what it points at is left alone */
+    snprintf(p, sizeof(p), "%s/run3", root);         make_dir(p, 0700);
+    snprintf(q, sizeof(q), "%s/elsewhere", root);    make_dir(q, 0755);
+    char link[1024]; snprintf(link, sizeof(link), "%s/run3/fluxdm", root);
+    EXPECT_EQ(symlink(q, link), 0);
+    EXPECT_EQ(flux_ipc_resolve_sock_path(p, "/nonexistent", out, sizeof(out)), -1);
+    EXPECT(err_has("not a plain directory") != NULL);
+    EXPECT_EQ(mode_of(q), 0755);
+
+    /* a plain file in the way is refused */
+    snprintf(p, sizeof(p), "%s/run4", root);         make_dir(p, 0700);
+    snprintf(q, sizeof(q), "%s/run4/fluxdm", root);
+    FILE *f = fopen(q, "w"); if (f) fclose(f);
+    EXPECT_EQ(flux_ipc_resolve_sock_path(p, "/nonexistent", out, sizeof(out)), -1);
+
+    /* a directory of somebody else's is refused (needs root to arrange) */
+    if (geteuid() == 0) {
+        snprintf(p, sizeof(p), "%s/run5", root);         make_dir(p, 0700);
+        snprintf(q, sizeof(q), "%s/run5/fluxdm", root);  make_dir(q, 0700);
+        EXPECT_EQ(chown(q, 12345, 12345), 0);
+        EXPECT_EQ(flux_ipc_resolve_sock_path(p, "/nonexistent", out, sizeof(out)), -1);
+        EXPECT(err_has("belongs to another user") != NULL);
+    } else {
+        printf("  (skipped: the 'belongs to another user' case needs root to set up)\n");
+    }
+
+    /* no usable XDG_RUNTIME_DIR: ~/.fluxdm/run */
+    char home[512]; snprintf(home, sizeof(home), "%s/home", root);   make_dir(home, 0755);
+    snprintf(p, sizeof(p), "%s/open", root);         make_dir(p, 0755);          /* open to others */
+    EXPECT_EQ(flux_ipc_resolve_sock_path(p, home, out, sizeof(out)), 0);
+    snprintf(q, sizeof(q), "%s/.fluxdm/run/core.sock", home);
+    EXPECT_STR(out, q);
+    snprintf(q, sizeof(q), "%s/.fluxdm/run", home);
+    EXPECT_EQ(mode_of(q), 0700);
+    EXPECT_EQ(flux_ipc_resolve_sock_path("relative/run", home, out, sizeof(out)), 0);   /* not absolute */
+    EXPECT(strstr(out, "/.fluxdm/run/core.sock") != NULL);
+    EXPECT_EQ(flux_ipc_resolve_sock_path(NULL, home, out, sizeof(out)), 0);             /* not set */
+    EXPECT_EQ(flux_ipc_resolve_sock_path("", home, out, sizeof(out)), 0);               /* set but empty */
+    snprintf(p, sizeof(p), "%s/missing", root);
+    EXPECT_EQ(flux_ipc_resolve_sock_path(p, home, out, sizeof(out)), 0);                /* does not exist */
+
+    /* an existing ~/.fluxdm keeps its mode: the daemon's data lives there */
+    char home2[512]; snprintf(home2, sizeof(home2), "%s/home2", root);   make_dir(home2, 0755);
+    snprintf(q, sizeof(q), "%s/.fluxdm", home2);     make_dir(q, 0755);
+    EXPECT_EQ(flux_ipc_resolve_sock_path(NULL, home2, out, sizeof(out)), 0);
+    EXPECT_EQ(mode_of(q), 0755);
+    snprintf(q, sizeof(q), "%s/.fluxdm/run", home2);
+    EXPECT_EQ(mode_of(q), 0700);
+
+    /* nothing to go on */
+    EXPECT_EQ(flux_ipc_resolve_sock_path(NULL, NULL, out, sizeof(out)), -1);
+    EXPECT(err_has("home directory") != NULL);
+    EXPECT_EQ(flux_ipc_resolve_sock_path(NULL, "relative/home", out, sizeof(out)), -1);
+
+    /* a path that cannot fit sockaddr_un is refused before anything is created */
+    char longhome[512]; snprintf(longhome, sizeof(longhome), "%s/%s", root,
+        "hhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhh");
+    EXPECT_EQ(flux_ipc_resolve_sock_path(NULL, longhome, out, sizeof(out)), -1);
+    EXPECT(err_has("too long") != NULL);
+    snprintf(q, sizeof(q), "%s/.fluxdm", longhome);
+    EXPECT_EQ(mode_of(q), -1);
+    char tiny[8];
+    EXPECT_EQ(flux_ipc_resolve_sock_path(NULL, home, tiny, sizeof(tiny)), -1);          /* the buffer is too small */
+
+    /* flux_ipc_default_sock_path reads the environment */
+    char *old_xdg = getenv("XDG_RUNTIME_DIR") ? strdup(getenv("XDG_RUNTIME_DIR")) : NULL;
+    char *old_home = getenv("HOME") ? strdup(getenv("HOME")) : NULL;
+    snprintf(p, sizeof(p), "%s/run", root);
+    setenv("XDG_RUNTIME_DIR", p, 1);
+    setenv("HOME", home, 1);
+    EXPECT_EQ(flux_ipc_default_sock_path(out, sizeof(out)), 0);
+    snprintf(q, sizeof(q), "%s/run/fluxdm/core.sock", root);
+    EXPECT_STR(out, q);
+    unsetenv("XDG_RUNTIME_DIR");
+    EXPECT_EQ(flux_ipc_default_sock_path(out, sizeof(out)), 0);
+    snprintf(q, sizeof(q), "%s/.fluxdm/run/core.sock", home);
+    EXPECT_STR(out, q);
+    if (old_xdg) setenv("XDG_RUNTIME_DIR", old_xdg, 1); else unsetenv("XDG_RUNTIME_DIR");
+    if (old_home) setenv("HOME", old_home, 1); else unsetenv("HOME");
+    free(old_xdg); free(old_home);
+
+    rm_rf(root);
+    flux_log_set_level(old_level);
+}
+
 int main(void) {
-    printf("\n%s%s FluxDM — Unit Tests (URL, HTTP head, IPC framing)%s\n", BOLD, CYAN, RESET);
+    printf("\n%s%s FluxDM — Unit Tests (URL, HTTP head, IPC framing, socket path)%s\n", BOLD, CYAN, RESET);
     test_url_parse();
     test_url_resolve();
     test_host_header();
@@ -634,6 +766,7 @@ int main(void) {
     test_frame_encode();
     test_frame_reader();
     test_wire_layout();
+    test_sock_path();
 
     printf("\n%s%s─────────────────────────────%s\n", BOLD, CYAN, RESET);
     printf("  %s✔  Passed : %d%s\n", GREEN, g_pass, RESET);

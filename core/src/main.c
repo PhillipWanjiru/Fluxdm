@@ -1,7 +1,7 @@
 /* FluxDM — core/src/main.c
  * Entry point of the C core daemon process.
  * The Java daemon starts this process on boot and talks to it over a Unix
- * socket (default /tmp/fluxdm.sock, mode 0600).
+ * socket (mode 0600, by default inside a private directory: see ipc/sock_path.h).
  *
  * Usage:
  *   fluxdm-core [--sock <path>] [--limit <bytes_per_sec>] [--log <0|1|2>]
@@ -12,6 +12,7 @@
 #include "../include/errors.h"
 #include "../include/hostgate.h"
 #include "../include/version.h"
+#include "ipc/sock_path.h"
 #include "ipc/socket_server.h"
 #include <errno.h>
 #include <signal.h>
@@ -60,7 +61,8 @@ static void usage(FILE *out) {
     fprintf(out,
         "FluxDM core daemon %s\n"
         "Usage: fluxdm-core [options]\n"
-        "  --sock  <path>        Unix socket to listen on (default " FLUX_IPC_SOCK_PATH ")\n"
+        "  --sock  <path>        Unix socket to listen on (default $XDG_RUNTIME_DIR/fluxdm/core.sock,\n"
+        "                        else ~/.fluxdm/run/core.sock; the directory is created private)\n"
         "  --limit <bytes/sec>   Global bandwidth cap, 0 = unlimited (default 0)\n"
         "  --log   <0|1|2>       Log level: 0 quiet, 1 info, 2 debug (default 1)\n"
         "  --patience <seconds>  How long a download keeps waiting for a server that answers\n"
@@ -145,7 +147,16 @@ int main(int argc, char **argv) {
     if (parse_args(argc, argv, &args) < 0) return 2;
 
     flux_log_set_level(args.log_level);
-    if (args.log_level > 0) print_banner(args.sock_path ? args.sock_path : FLUX_IPC_SOCK_PATH);
+    char        default_sock[108];                  /* sizeof(sockaddr_un.sun_path) */
+    const char *sock_path = args.sock_path;
+    if (!sock_path || !*sock_path) {
+        if (flux_ipc_default_sock_path(default_sock, sizeof(default_sock)) < 0) {
+            fprintf(stderr, "[fluxdm-core] cannot choose a socket: %s\n", flux_last_error_str());
+            return 1;
+        }
+        sock_path = default_sock;
+    }
+    if (args.log_level > 0) print_banner(sock_path);
 
     if (args.patience_set) flux_gate_set_patience_ms(args.patience_ms);
     raise_fd_limit();
@@ -160,7 +171,7 @@ int main(int argc, char **argv) {
         flux_log(1, "global limit: %llu bytes/sec", (unsigned long long)args.global_limit);
     }
 
-    if (flux_ipc_server_init(&g_ipc_server, &g_registry, args.sock_path) < 0) {
+    if (flux_ipc_server_init(&g_ipc_server, &g_registry, sock_path) < 0) {
         fprintf(stderr, "[fluxdm-core] cannot start the IPC server: %s\n", flux_last_error_str());
         flux_ipc_server_close(&g_ipc_server);
         flux_registry_destroy(&g_registry);

@@ -3,6 +3,7 @@
  */
 
 #include "socket_server.h"
+#include "sock_path.h"
 #include "../../include/errors.h"
 #include "../../include/util.h"
 #include <errno.h>
@@ -501,7 +502,12 @@ int flux_ipc_server_init(flux_ipc_server_t *srv, flux_registry_t *reg, const cha
         pthread_mutex_init(&srv->clients[i].out_lock, NULL);
     }
 
-    const char *path = sock_path && *sock_path ? sock_path : FLUX_IPC_SOCK_PATH;
+    char        fallback[sizeof(srv->sock_path)];
+    const char *path = sock_path;
+    if (!path || !*path) {
+        if (flux_ipc_default_sock_path(fallback, sizeof(fallback)) < 0) return -1;     /* the error is set */
+        path = fallback;
+    }
     if (strlen(path) >= sizeof(srv->sock_path)) {
         flux_set_error(FLUX_ERR_IPC_BIND, "socket path too long (max %zu characters): %s",
                        sizeof(srv->sock_path) - 1, path);
