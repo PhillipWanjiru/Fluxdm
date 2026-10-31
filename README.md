@@ -210,6 +210,7 @@ Any of them can be overridden on the command line (`--key=value`).
 ```bash
 bash tests/run_all.sh            # C unit + integration + behaviour suites (several minutes; --quick for less)
 bash tests/run_daemon_tests.sh   # Java suites against a fake core and the real core (--no-maven to skip the Maven step)
+bash tests/smoke_api.sh          # the built daemon's API defences over real HTTP and WebSocket (needs the jar and core built)
 bash tests/run_engine_tests.sh   # C++ engine layer
 ```
 

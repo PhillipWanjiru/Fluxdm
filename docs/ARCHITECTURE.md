@@ -417,18 +417,31 @@ removes the one ambiguity that remains.
 
 ## 6. Security model
 
-- **The API is unauthenticated and listens on `127.0.0.1` only.** It must not be exposed: anything
-  that can reach it can start downloads that write anywhere the daemon's user can write. It does not
-  yet validate the `Host` or `Origin` of requests either, which is what stands between a local service
-  and a hostile web page; [SECURITY.md](../SECURITY.md#known-limitations) spells out the consequences
-  and the roadmap puts the fix first.
+- **The API listens on `127.0.0.1` only, and every request proves where it comes from.** It starts
+  downloads that write anywhere the daemon's user can write, so `security/ApiGuardFilter` runs in front
+  of Spring MVC and `security/ApiGuard` decides, in this order: `Host` must be one of
+  `fluxdm.api.allowed-hosts` (a page that DNS rebinding has pointed at `127.0.0.1` still names its own
+  host, so this stops rebinding); `Origin`, when present, must be one of `fluxdm.api.allowed-origins`
+  (exact strings; `null` and wildcards are refused), which stops cross-site requests and WebSocket
+  hijacking; and the request must carry `Authorization: Bearer <token>`. The token is 256 random bits in
+  `~/.fluxdm/api-token` (mode `0600`, created atomically on first start, kept across restarts, compared
+  in constant time); the daemon refuses to start if it cannot prepare the file. A CORS preflight and the
+  `/ws` handshake carry no token, because browsers cannot add headers there, so only their `Host` and
+  `Origin` are checked (the `/ws` exemption matches the URI exactly as sent, in plain form only, so
+  `/ws/../api/downloads` is not exempt; for the same reason nothing but the SockJS endpoint may ever be
+  served under `/ws`); on the WebSocket, `security/StompAuthInterceptor` requires the token in the
+  `CONNECT` frame and refuses every other frame until a `CONNECT` has succeeded. Refusals are fixed
+  texts that never echo client input and are logged at most once every 30 seconds per kind. The token
+  protects against web pages and other accounts, not against other programs running as the same user
+  ([SECURITY.md](../SECURITY.md#known-limitations)).
 - **The IPC socket is mode `0600` and lives in a directory only its user can enter**:
   `$XDG_RUNTIME_DIR/fluxdm/` when that is a private directory of the user's, otherwise
   `~/.fluxdm/run/`. Both the core (`core/src/ipc/sock_path.c`) and the daemon (`security/RuntimeDir`)
   create the directory mode `0700`, close one that was left open, and refuse a symbolic link, a file
   or another user's directory, so nobody else can plant a socket there for the daemon to adopt. The
   core will not take over a socket that a live process serves, and it never deletes a path that is not
-  a socket.
+  a socket. `~/.fluxdm` itself, which also holds the database and the token, is mode `0700` too
+  (`security/DataDir`).
 - **TLS verification cannot be disabled.** Peer certificate and hostname (or IP) checks are always on.
 - **Untrusted input is validated at every boundary**: URL, path and payload lengths and embedded NULs
   in `CMD_START`; frame magic, version and size; the `.fluxpart` file's structure before any of it is

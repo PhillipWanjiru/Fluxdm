@@ -114,6 +114,7 @@ A change is not finished until its tests are. See [docs/TESTING.md](docs/TESTING
   ```bash
   bash tests/run_all.sh              # C unit + integration + behaviour
   bash tests/run_daemon_tests.sh     # Java (add --no-maven if you have no network)
+  bash tests/smoke_api.sh            # the built daemon's API defences; needs `make -C core` and `mvn -f daemon/pom.xml -DskipTests package`
   bash tests/run_engine_tests.sh     # C++ engine layer
   ```
 
