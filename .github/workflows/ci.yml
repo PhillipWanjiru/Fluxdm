@@ -119,6 +119,11 @@ jobs:
       - name: Java suites (scripted fake core, then the real core)
         run: bash tests/run_daemon_tests.sh --no-maven
 
+      # Starts the jar that was just built and talks to it over HTTP and WebSocket: the Host, Origin and token
+      # checks as Spring wires them, which the Java suites (stand-ins for Spring) cannot show.
+      - name: API smoke test (the real daemon)
+        run: bash tests/smoke_api.sh
+
   engine:
     name: engine
     runs-on: ubuntu-24.04

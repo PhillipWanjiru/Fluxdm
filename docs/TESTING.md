@@ -10,6 +10,7 @@ that touch threads and memory run under sanitizers.
 - [What the behaviour suite covers](#what-the-behaviour-suite-covers)
 - [Sanitizer builds](#sanitizer-builds)
 - [How the daemon is tested](#how-the-daemon-is-tested)
+- [The API smoke test](#the-api-smoke-test)
 - [The mock origin server](#the-mock-origin-server)
 - [Test quality](#test-quality)
 - [Continuous integration](#continuous-integration)
@@ -25,6 +26,7 @@ bash tests/run_all.sh --quick      # the same, without the large throughput run
 bash tests/run_all.sh --no-core    # unit tests only (seconds)
 
 bash tests/run_daemon_tests.sh     # Java suites (add --no-e2e to skip the real-core suite, --no-maven to skip the Maven step)
+bash tests/smoke_api.sh            # the built daemon's API defences over real HTTP and WebSocket (needs the jar and the core built)
 bash tests/run_engine_tests.sh     # C++ engine layer
 
 python3 tests/test_core.py -k rate_limit      # only the behaviour tests whose function name contains "rate_limit"
@@ -42,6 +44,7 @@ test starts its **own** core on a private socket, so a daemon or core you are ru
 | **Integration** | `python3 tests/test_integration.py` | python3 | A smoke test of the real core through the real IPC protocol, against a range-aware local server: the core starts and binds a private (`0600`) socket; a 1 MB download in 4 segments completes with the right SHA-256 and no `.fluxpart` left behind; `STATUS`, `STATUS_ALL`, `SET_LIMIT` and `CANCEL` (idempotent, cleans up) behave; the progress frames of a 10 MB download are flagged as events and never go backwards or past the total; the core exits cleanly on `SHUTDOWN`. |
 | **Behaviour** | `python3 tests/test_core.py [--quick] [-k substring]` | python3, `openssl` CLI | The core as a black box against scriptable local HTTP and HTTPS servers. See below. |
 | **Daemon** | `bash tests/run_daemon_tests.sh` | JDK 21 (Maven optional) | The Java services against a scripted fake core, and against the real core. See below. |
+| **API smoke** | `bash tests/smoke_api.sh` | JDK 21, curl, python3, the built jar and core | The real daemon, started in a throw-away home directory, refuses the wrong Host, the wrong Origin and a missing or wrong token over real HTTP and WebSocket. See below. |
 | **Engine** | `bash tests/run_engine_tests.sh` | g++, `libssl-dev` | The C++ engine layer: segment manager, adaptive tuner, buffer manager, bencode and `.torrent` metadata parsing, magnet links, SHA-1, peer discovery. Compiles directly with `g++`; no CMake needed. |
 
 ## What the behaviour suite covers
@@ -109,6 +112,41 @@ run, with no Maven, no jars and no network.
 **What that does not cover.** The stubs are not Spring. Bean wiring, JPA and SQLite, the REST mappings
 and the WebSocket endpoint are exercised only by a real build. The script's last step runs
 `mvn -q -DskipTests package` when Maven is available and can reach Maven Central, and CI does the same.
+The API smoke test below is what exercises Spring's side of the API defences.
+
+## The API smoke test
+
+`ApiSecurityTest` proves the logic of the local API's defences, but it drives the filter and the STOMP
+interceptor through stand-ins, so it cannot show that Spring really puts them in front of every request.
+[`tests/smoke_api.sh`](../tests/smoke_api.sh) does: it starts the built daemon (`daemon/target/fluxdm-daemon.jar`)
+and the real core in a throw-away home directory, on a free port, and checks over real HTTP and a real
+WebSocket that
+
+- a request without the token, with a wrong token, or with the token under another scheme gets `401`;
+- another `Host` (DNS rebinding) and another `Origin` (including `null`) get `403`, even with the token, and
+  the refusal carries no CORS header, so the page that sent the request cannot read it;
+- a cross-site `POST` without a preflight starts no download;
+- the UI's origin is served with its CORS headers, a preflight needs no token, and a path that only pretends
+  to be under `/ws` (`/ws/../api/downloads`) still needs one;
+- on the WebSocket, `CONNECT` is refused without the token, and `SUBSCRIBE` and `SEND` are refused until a
+  `CONNECT` with the token has succeeded, and accepted after it;
+- the token file has mode `0600`, the runtime directory `0700`, the core's socket is inside it, and the token
+  is not in the daemon's log.
+
+```bash
+make -C core && mvn -f daemon/pom.xml -DskipTests package      # once
+bash tests/smoke_api.sh
+bash tests/smoke_api.sh --keep                                 # leave the daemon log and home directory behind
+```
+
+Most of the run is the daemon starting. It needs no network and touches nothing outside its own temporary
+directory: the daemon runs with `HOME` and `user.home` pointed there, so your real `~/.fluxdm` and token are
+not used. A failed run keeps that directory and prints its path.
+
+Like the other suites, the script was checked to be able to fail. It was developed against a stand-in server
+with 23 deliberately broken variants (a skipped Host check, a wrong-token check that accepts any bearer, a
+token file that is group-readable, a session that forgets it authenticated, ...), and had to fail on the
+matching check for every one of them. The stand-in is not part of the repository.
 
 ## The mock origin server
 
@@ -162,7 +200,7 @@ Ubuntu runner:
 | **hygiene** | ShellCheck over every shell script; the git-hook tests (`.github/scripts/test-hooks.sh`); the Conventional Commits check over the commits of the push or pull request |
 | **core** | Release build of the core; the three C unit suites (ASan + UBSan); the integration suite; the behaviour suite (`--quick`) |
 | **core-sanitizers** | The core built with ASan + UBSan, then with ThreadSanitizer, each driven by the integration suite; `UBSAN_OPTIONS` and `TSAN_OPTIONS` are set to `halt_on_error=1`, so a report ends the run instead of scrolling past |
-| **daemon** | `mvn package` (compiles the daemon against real Spring and runs the build) and the Java suites, including the end-to-end suite against the real core |
+| **daemon** | `mvn package` (compiles the daemon against real Spring and runs the build), the Java suites including the end-to-end suite against the real core, and the API smoke test against the jar that was just built |
 | **engine** | The C++ engine build and its tests |
 
 The commands in the workflow are the same ones documented above; run them locally to reproduce a CI
