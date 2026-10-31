@@ -73,7 +73,7 @@ public final class RuntimeDir {
                                   + " bytes): " + dir + "/" + SOCKET_NAME + "; set fluxdm.core.socket-path");
         }
 
-        if (base != null) Files.createDirectories(base);       // the daemon keeps its data there, too
+        if (base != null) DataDir.ensurePrivate(base);         // the daemon keeps its data there, too
         makePrivate(dir, me);
         return dir;
     }

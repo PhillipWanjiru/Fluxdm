@@ -8,7 +8,7 @@
 #             handshake), a missing or wrong token, STOMP frames from a session that never sent a valid CONNECT
 #   serves    the right token, the UI's origin with CORS headers, preflights, the SockJS handshake, and a STOMP
 #             session that did CONNECT with the token
-#   keeps     the token file mode 0600, the runtime directory mode 0700, the core socket inside it
+#   keeps     ~/.fluxdm and the runtime directory mode 0700, the token file mode 0600, the core socket inside it
 #
 # This is the test for what tests/run_daemon_tests.sh cannot reach: how Spring itself wires the request filter,
 # the STOMP interceptor and the CORS settings. The Java logic behind them is covered by ApiSecurityTest.
@@ -118,12 +118,14 @@ if [[ $ready -ne 1 ]]; then
 fi
 pass "the daemon answers on $BASE"
 
-TOKEN_FILE="$HOME_DIR/.fluxdm/api-token"
-RUN_DIR="$HOME_DIR/.fluxdm/run"
+DATA_DIR="$HOME_DIR/.fluxdm"
+TOKEN_FILE="$DATA_DIR/api-token"
+RUN_DIR="$DATA_DIR/run"
 SOCK="$RUN_DIR/core.sock"
 
 # ── Files and directories ─────────────────────────────────────────────────────
-info "Token file and runtime directory"
+info "Data directory, token file and runtime directory"
+check "the data directory $DATA_DIR has mode 0700" "its mode is $(mode_of "$DATA_DIR")" test "$(mode_of "$DATA_DIR")" = 700
 check "the token file exists" "there is no $TOKEN_FILE" test -f "$TOKEN_FILE"
 TOKEN="$(tr -d '\r\n' < "$TOKEN_FILE" 2>/dev/null || true)"
 check "...with mode 0600" "its mode is $(mode_of "$TOKEN_FILE")" test "$(mode_of "$TOKEN_FILE")" = 600

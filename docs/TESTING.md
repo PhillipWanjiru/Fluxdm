@@ -130,8 +130,8 @@ WebSocket that
   to be under `/ws` (`/ws/../api/downloads`) still needs one;
 - on the WebSocket, `CONNECT` is refused without the token, and `SUBSCRIBE` and `SEND` are refused until a
   `CONNECT` with the token has succeeded, and accepted after it;
-- the token file has mode `0600`, the runtime directory `0700`, the core's socket is inside it, and the token
-  is not in the daemon's log.
+- `~/.fluxdm` and the runtime directory have mode `0700`, the token file `0600`, the core's socket is inside
+  the runtime directory, and the token is not in the daemon's log.
 
 ```bash
 make -C core && mvn -f daemon/pom.xml -DskipTests package      # once
