@@ -153,6 +153,9 @@ curl -s -H "$AUTH" http://127.0.0.1:7171/api/health                        # dae
 Without the token a request gets `401`. A request that names another host, or comes from a web page
 that is not on the allow-list, gets `403` even with the token ([SECURITY.md](SECURITY.md)).
 
+The UI prototype reads the token itself: the Electron app through its main process, and `npm start` in a
+browser when run as `REACT_APP_FLUXDM_TOKEN="$(cat ~/.fluxdm/api-token)" npm start`.
+
 | Method and path | Purpose |
 |---|---|
 | `GET /api/downloads`, `GET /api/downloads/{id}` | List, inspect |
