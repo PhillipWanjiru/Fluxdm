@@ -3,6 +3,16 @@
 
 package org.springframework.web.servlet.config.annotation;
 
+import java.util.ArrayList;
+import java.util.List;
+
 public class CorsRegistry {
-    public CorsRegistration addMapping(String pathPattern) { return new CorsRegistration(); }
+    /** What was added, so a test can look. */
+    public final List<CorsRegistration> registrations = new ArrayList<>();
+
+    public CorsRegistration addMapping(String pathPattern) {
+        CorsRegistration r = new CorsRegistration(pathPattern);
+        registrations.add(r);
+        return r;
+    }
 }
