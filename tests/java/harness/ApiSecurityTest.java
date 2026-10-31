@@ -1,5 +1,5 @@
 /* FluxDM — tests/java/harness/ApiSecurityTest.java
- * The defences of the local API: the private runtime directory, the token file, the Host / Origin / token
+ * The defences of the local API: the private data and runtime directories, the token file, the Host / Origin / token
  * decisions, the HTTP filter, the STOMP interceptor, and the settings that tie them together.
  *
  * Everything here runs the real classes of daemon/src/main. What it cannot show is Spring itself calling them
@@ -14,6 +14,7 @@ import com.fluxdm.security.ApiGuard;
 import com.fluxdm.security.ApiGuard.Verdict;
 import com.fluxdm.security.ApiGuardFilter;
 import com.fluxdm.security.ApiToken;
+import com.fluxdm.security.DataDir;
 import com.fluxdm.security.RuntimeDir;
 import com.fluxdm.security.StompAuthInterceptor;
 import jakarta.servlet.http.HttpServletRequest;
@@ -68,6 +69,7 @@ public class ApiSecurityTest {
         root = scratchRoot();
         try {
             quietly(ApiSecurityTest::runtimeDir);
+            quietly(ApiSecurityTest::dataDir);
             quietly(ApiSecurityTest::apiToken);
             quietly(ApiSecurityTest::decisions);
             quietly(ApiSecurityTest::guardSetup);
@@ -278,6 +280,61 @@ public class ApiSecurityTest {
             T.ok(foreign instanceof IOException && says(foreign, "belongs to another user"), "somebody else's ~/.fluxdm/run is refused (" + foreign + ")");
         } else {
             note("not root (or no 'nobody' account): the foreign-owner cases are skipped");
+        }
+    }
+
+    /* ═══ DataDir ═══ */
+
+    static void dataDir() throws Exception {
+        T.section("Data directory: ~/.fluxdm is private");
+
+        Path home = fresh("home");
+        Path dir  = home.resolve(".fluxdm");
+        T.ok(!DataDir.ensurePrivate(dir), "a directory that does not exist is created (nothing had to be closed)");
+        T.eq("rwx------", perms(dir), "...private from the start");
+        T.ok(!DataDir.ensurePrivate(dir) && perms(dir).equals("rwx------"), "a private directory is left as it is");
+
+        for (String mode : new String[] {"rwxr-xr-x", "rwxrwxrwx", "rwxr-x---", "rwx--x---", "rwx---r--", "rwx-----x"}) {
+            chmod(dir, mode);
+            boolean closed = DataDir.ensurePrivate(dir);
+            T.ok(closed && perms(dir).equals("rwx------"), "an existing directory with mode " + mode + " is closed (" + perms(dir) + ")");
+        }
+
+        chmod(dir, "r-x------");
+        T.ok(!DataDir.ensurePrivate(dir) && perms(dir).equals("r-x------"), "a directory only we can enter is not touched, whatever else its mode says");
+        chmod(dir, "rwx------");
+
+        Path nested = home.resolve("a/b/.fluxdm");
+        DataDir.ensurePrivate(nested);
+        T.ok(perms(nested).equals("rwx------") && perms(home.resolve("a")).equals("rwx------"), "missing parents are created private too");
+
+        Path file = Files.createFile(root.resolve("not-a-dir-" + (++seq)));
+        Throwable onFile = thrown(() -> DataDir.ensurePrivate(file));
+        T.ok(onFile instanceof IOException && says(onFile, "could not create " + file), "a file in its place is refused, saying so (" + onFile + ")");
+
+        Path disk = fresh("disk");
+        chmod(disk, "rwxr-xr-x");
+        Path link = Files.createSymbolicLink(home.resolve("link"), disk);
+        T.ok(DataDir.ensurePrivate(link), "a link to a directory of ours (~/.fluxdm on another disk) is followed...");
+        T.ok(perms(disk).equals("rwx------") && Files.isSymbolicLink(link), "...the directory it points at is closed, and the link is still a link");
+
+        /* RuntimeDir keeps its parent under the same rule. */
+        Path h1 = fresh("home");
+        RuntimeDir.ensure(env(null, h1.toString()), h1.toString());
+        T.eq("rwx------", perms(h1.resolve(".fluxdm")), "~/.fluxdm is created private when the socket directory has to be made");
+        Path h2 = fresh("home");
+        Path open = Files.createDirectory(h2.resolve(".fluxdm"));
+        chmod(open, "rwxr-xr-x");
+        RuntimeDir.ensure(env(null, h2.toString()), h2.toString());
+        T.eq("rwx------", perms(open), "...and an open one is closed");
+
+        if (isRoot() && lookup("nobody") != null) {
+            Path foreign = fresh("foreign");
+            chmod(foreign, "rwxr-xr-x");
+            Files.setOwner(foreign, lookup("nobody"));
+            T.ok(!DataDir.ensurePrivate(foreign) && perms(foreign).equals("rwxr-xr-x"), "somebody else's directory is not ours to change: left alone");
+        } else {
+            note("not root (or no 'nobody' account): the foreign-owner case is skipped");
         }
     }
 
