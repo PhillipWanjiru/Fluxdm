@@ -19,6 +19,7 @@ import com.fluxdm.ipc.CoreIPCClient.AckResult;
 import com.fluxdm.ipc.CoreIPCClient.StatusInfo;
 import com.fluxdm.model.Download;
 import com.fluxdm.model.Stats;
+import com.fluxdm.security.RuntimeDir;
 import com.fluxdm.service.BandwidthService;
 import com.fluxdm.service.DownloadService;
 import com.fluxdm.service.IPCBridgeService;
@@ -103,6 +104,7 @@ public class DaemonE2ETest {
             run("limits",            DaemonE2ETest::limits);
             run("coreCrash",         DaemonE2ETest::coreCrash);
             run("daemonRestart",     DaemonE2ETest::daemonRestart);
+            run("defaultSocket",     DaemonE2ETest::defaultSocket);
             run("bridgeLifecycle",   DaemonE2ETest::bridgeLifecycle);
         } finally {
             for (Process p : strays) if (p.isAlive()) p.destroyForcibly();
@@ -816,6 +818,46 @@ public class DaemonE2ETest {
             return true;
         } catch (IOException e) {
             return false;
+        }
+    }
+
+    /** The core (C) and the daemon (Java) each work out the default socket from the environment. They have to
+     *  arrive at the same path, or a core started by hand would never be found by the daemon. */
+    static void defaultSocket() throws Exception {
+        T.section("The core and the daemon choose the same default socket");
+        for (String xdgMode : new String[] {"private", "open", "unset"}) {
+            for (boolean coreFirst : new boolean[] {true, false}) {
+                String label = "$XDG_RUNTIME_DIR " + xdgMode + (coreFirst ? ", the core makes the directory" : ", the daemon makes it");
+                Path home = Files.createDirectories(root.resolve("dh" + sockSeq++));
+                Map<String, String> env = new HashMap<>();
+                env.put("HOME", home.toString());
+                Path expectedDir = home.resolve(".fluxdm/run");
+                if (!xdgMode.equals("unset")) {
+                    Path xdg = Files.createDirectories(root.resolve("dx" + sockSeq++));
+                    Files.setPosixFilePermissions(xdg, PosixFilePermissions.fromString(xdgMode.equals("private") ? "rwx------" : "rwxr-xr-x"));
+                    env.put("XDG_RUNTIME_DIR", xdg.toString());
+                    if (xdgMode.equals("private")) expectedDir = xdg.resolve("fluxdm");
+                }
+                final Path expected = expectedDir.resolve(RuntimeDir.SOCKET_NAME);
+
+                if (!coreFirst) RuntimeDir.ensure(env, home.toString());          // the daemon gets there first
+                ProcessBuilder pb = new ProcessBuilder(coreBin.toString(), "--log", String.valueOf(CORE_LOG))
+                    .redirectOutput(ProcessBuilder.Redirect.DISCARD).redirectError(ProcessBuilder.Redirect.DISCARD);
+                pb.environment().clear();
+                pb.environment().putAll(env);
+                Process core = pb.start();
+                strays.add(core);
+                try {
+                    T.ok(T.waitFor(() -> canConnect(expected), 5000), label + ": the core listens on " + root.relativize(expected));
+                    Path chosen = RuntimeDir.ensure(env, home.toString());
+                    T.eq(expectedDir, chosen, "...and the daemon picks the same directory");
+                    T.ok(canConnect(chosen.resolve(RuntimeDir.SOCKET_NAME)), "...and reaches the core there");
+                    T.eq("rwx------", PosixFilePermissions.toString(Files.getPosixFilePermissions(chosen)), "...in a directory only the user can enter");
+                } finally {
+                    core.destroy();
+                    core.waitFor(5, TimeUnit.SECONDS);
+                }
+            }
         }
     }
 

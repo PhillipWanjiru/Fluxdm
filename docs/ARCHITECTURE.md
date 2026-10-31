@@ -422,8 +422,13 @@ removes the one ambiguity that remains.
   yet validate the `Host` or `Origin` of requests either, which is what stands between a local service
   and a hostile web page; [SECURITY.md](../SECURITY.md#known-limitations) spells out the consequences
   and the roadmap puts the fix first.
-- **The IPC socket is mode `0600`**, one per user (`/tmp/fluxdm-<user>.sock`). The core will not take
-  over a socket that a live process serves, and it never deletes a path that is not a socket.
+- **The IPC socket is mode `0600` and lives in a directory only its user can enter**:
+  `$XDG_RUNTIME_DIR/fluxdm/` when that is a private directory of the user's, otherwise
+  `~/.fluxdm/run/`. Both the core (`core/src/ipc/sock_path.c`) and the daemon (`security/RuntimeDir`)
+  create the directory mode `0700`, close one that was left open, and refuse a symbolic link, a file
+  or another user's directory, so nobody else can plant a socket there for the daemon to adopt. The
+  core will not take over a socket that a live process serves, and it never deletes a path that is not
+  a socket.
 - **TLS verification cannot be disabled.** Peer certificate and hostname (or IP) checks are always on.
 - **Untrusted input is validated at every boundary**: URL, path and payload lengths and embedded NULs
   in `CMD_START`; frame magic, version and size; the `.fluxpart` file's structure before any of it is

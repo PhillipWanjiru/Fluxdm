@@ -42,6 +42,7 @@
  */
 package com.fluxdm.ipc;
 
+import com.fluxdm.security.RuntimeDir;
 import jakarta.annotation.PreDestroy;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -177,8 +178,9 @@ public class CoreIPCClient {
     /* Dispatcher thread: completes futures, calls listeners, fires timeouts. */
     private final ScheduledThreadPoolExecutor events;
 
-    public CoreIPCClient(@Value("${fluxdm.core.socket-path:/tmp/fluxdm.sock}") String sockPath) {
-        this.sockPath = sockPath;
+    /** An empty {@code sockPath} means the default: the private runtime directory (see {@link RuntimeDir}). */
+    public CoreIPCClient(@Value("${fluxdm.core.socket-path:}") String sockPath) {
+        this.sockPath = sockPath == null || sockPath.isBlank() ? defaultSocketPath() : sockPath;
         this.events = new ScheduledThreadPoolExecutor(1, r -> {
             Thread t = new Thread(r, "fluxdm-ipc-events");
             t.setDaemon(true);
@@ -189,6 +191,14 @@ public class CoreIPCClient {
     }
 
     public String socketPath() { return sockPath; }
+
+    private static String defaultSocketPath() {
+        try {
+            return RuntimeDir.defaultSocket().toString();
+        } catch (IOException e) {
+            throw new IllegalStateException("cannot choose a socket location: " + e.getMessage(), e);
+        }
+    }
 
     /** How long a command may wait for the core's reply before its future completes with
      *  ERR_NO_REPLY. The default (ACK_TIMEOUT_SECS) is right for production; tests shorten it. */
