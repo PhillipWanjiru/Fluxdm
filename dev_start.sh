@@ -48,5 +48,6 @@ fi
 mvn -q -DskipTests package
 ok "daemon built"
 
+echo -e "  ${CYAN}API token:${RESET} ~/.fluxdm/api-token (created on the first start; requests send  Authorization: Bearer <token>)"
 echo ""
 exec java -jar target/fluxdm-daemon.jar

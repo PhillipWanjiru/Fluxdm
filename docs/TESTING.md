@@ -91,10 +91,11 @@ core's log for sanitizer reports and fails if it finds any. Sanitized binaries a
 
 ## How the daemon is tested
 
-`tests/run_daemon_tests.sh` needs only a JDK. It runs four suites:
+`tests/run_daemon_tests.sh` needs only a JDK. It runs five suites:
 
 | Suite | What it covers |
 |---|---|
+| `ApiSecurityTest` | The local API's defences, driven through stand-in servlet and message objects: the private runtime directory and the core's socket path, the token file (created atomically with mode `0600`; group- or world-readable files, symlinks and files of other users refused), the Host / Origin / token verdicts and their order, the HTTP filter (preflights, what the `/ws` exemption allows and what it must not, fixed error bodies, rate-limited logging), and the token check in the STOMP `CONNECT` frame |
 | `QueueServiceTest` | Who may run: slots tracked by id, priority order, idempotent release, adoption |
 | `CoreIPCClientTest` | The wire protocol from the client's side: reply versus event matching, ordering, timeouts, reconnects, protocol abuse |
 | `DownloadServiceTest` | The download logic against a scripted fake core: validation, queueing, pause / resume / cancel, error handling, recovery after a core or daemon restart, the scheduler, the bandwidth service |

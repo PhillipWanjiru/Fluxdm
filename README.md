@@ -130,20 +130,28 @@ java -jar daemon/target/fluxdm-daemon.jar --fluxdm.core.binary-path="$PWD/core/f
 
 ### Use it
 
+Every request carries the API token: a random secret that the daemon creates on its first start in
+`~/.fluxdm/api-token`, readable only by you.
+
 ```bash
+AUTH="Authorization: Bearer $(cat ~/.fluxdm/api-token)"
+
 # add a download (8 segments by default; filePath must be absolute or start with ~/)
-curl -s -X POST http://127.0.0.1:7171/api/downloads \
+curl -s -X POST http://127.0.0.1:7171/api/downloads -H "$AUTH" \
      -H 'Content-Type: application/json' \
      -d '{"url":"https://example.org/big-file.iso","filePath":"~/Downloads/big-file.iso","segments":8}'
 
-curl -s http://127.0.0.1:7171/api/downloads            # list
-curl -s -X POST http://127.0.0.1:7171/api/downloads/1/pause
-curl -s -X POST http://127.0.0.1:7171/api/downloads/1/resume
-curl -s -X PUT  http://127.0.0.1:7171/api/downloads/1/limit \
-     -H 'Content-Type: application/json' -d '{"bytesPerSec":500000}'   # 0 = unlimited
-curl -s -X DELETE http://127.0.0.1:7171/api/downloads/1                # cancel
-curl -s http://127.0.0.1:7171/api/health                               # daemon + core status
+curl -s -H "$AUTH" http://127.0.0.1:7171/api/downloads                     # list
+curl -s -H "$AUTH" -X POST http://127.0.0.1:7171/api/downloads/1/pause
+curl -s -H "$AUTH" -X POST http://127.0.0.1:7171/api/downloads/1/resume
+curl -s -H "$AUTH" -X PUT  http://127.0.0.1:7171/api/downloads/1/limit \
+     -H 'Content-Type: application/json' -d '{"bytesPerSec":500000}'       # 0 = unlimited
+curl -s -H "$AUTH" -X DELETE http://127.0.0.1:7171/api/downloads/1         # cancel
+curl -s -H "$AUTH" http://127.0.0.1:7171/api/health                        # daemon + core status
 ```
+
+Without the token a request gets `401`. A request that names another host, or comes from a web page
+that is not on the allow-list, gets `403` even with the token ([SECURITY.md](SECURITY.md)).
 
 | Method and path | Purpose |
 |---|---|
@@ -155,7 +163,7 @@ curl -s http://127.0.0.1:7171/api/health                               # daemon 
 | `GET /api/bandwidth`, `PUT /api/bandwidth` | Daemon-wide speed limit (`globalLimitBps`) |
 | `GET /api/stats`, `GET /api/health` | Totals and live speed; liveness of daemon and core |
 | `GET/POST/DELETE /api/scheduler` | Scheduled resumes (one-shot or repeating) |
-| `ws://127.0.0.1:7171/ws` (STOMP) | Live progress on `/topic/downloads` and `/topic/downloads/{id}` |
+| `ws://127.0.0.1:7171/ws` (STOMP) | Live progress on `/topic/downloads` and `/topic/downloads/{id}`; send the token in the `CONNECT` frame's `Authorization` header |
 
 Errors come back as `{"error": "..."}` with a fitting status (400, 404, 409, 503).
 
@@ -181,10 +189,14 @@ Any of them can be overridden on the command line (`--key=value`).
 
 | Property | Default | Meaning |
 |---|---|---|
-| `server.address`, `server.port` | `127.0.0.1`, `7171` | Where the API listens. Keep it on loopback: the API has no authentication. |
+| `server.address`, `server.port` | `127.0.0.1`, `7171` | Where the API listens. Keep it on loopback. |
 | `spring.datasource.url` | `jdbc:sqlite:${user.home}/.fluxdm/fluxdm.db` | Database file (the daemon creates `~/.fluxdm/` on first start) |
 | `fluxdm.core.binary-path` | `${user.home}/Desktop/fluxdm/core/fluxdm-core` | Core binary the daemon spawns |
 | `fluxdm.core.socket-path` | *(unset)* | IPC socket. Unset, it is `$XDG_RUNTIME_DIR/fluxdm/core.sock`, or `~/.fluxdm/run/core.sock` when that directory is not private; the directory is created mode `0700`. Set it only to put the socket somewhere else. |
+| `fluxdm.api.auth.enabled` | `true` | Require the API token. `false` is for development only: the host and origin checks stay on |
+| `fluxdm.api.token-file` | `~/.fluxdm/api-token` | Where the token is kept (created mode `0600` on first start; delete the file to rotate it) |
+| `fluxdm.api.allowed-hosts` | `127.0.0.1,localhost,[::1]` | Host names the API answers to; any other `Host` is refused (this stops DNS rebinding) |
+| `fluxdm.api.allowed-origins` | `http://localhost:3000,app://-` | Web origins that may call the API (the UI); a request from any other origin is refused |
 | `fluxdm.core.global-limit-bps` | `0` | Global speed cap |
 | `fluxdm.core.patience-seconds` | `300` | Rate-limit patience passed to the core |
 | `fluxdm.max-concurrent-downloads` | `4` | Downloads running at once; the rest wait in the queue |

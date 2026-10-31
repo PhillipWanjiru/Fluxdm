@@ -3,7 +3,13 @@
 
 package org.springframework.web.socket.config.annotation;
 
+/** Records what was configured, so a test can look. */
 public class StompWebSocketEndpointRegistration {
-    public StompWebSocketEndpointRegistration setAllowedOriginPatterns(String... patterns) { return this; }
-    public StompWebSocketEndpointRegistration withSockJS() { return this; }
+    public String[] origins        = {};
+    public String[] originPatterns = {};
+    public boolean  sockJs;
+
+    public StompWebSocketEndpointRegistration setAllowedOrigins(String... origins)               { this.origins = origins; return this; }
+    public StompWebSocketEndpointRegistration setAllowedOriginPatterns(String... originPatterns) { this.originPatterns = originPatterns; return this; }
+    public StompWebSocketEndpointRegistration withSockJS()                                       { sockJs = true; return this; }
 }
