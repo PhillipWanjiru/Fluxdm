@@ -184,7 +184,7 @@ Any of them can be overridden on the command line (`--key=value`).
 | `server.address`, `server.port` | `127.0.0.1`, `7171` | Where the API listens. Keep it on loopback: the API has no authentication. |
 | `spring.datasource.url` | `jdbc:sqlite:${user.home}/.fluxdm/fluxdm.db` | Database file (the daemon creates `~/.fluxdm/` on first start) |
 | `fluxdm.core.binary-path` | `${user.home}/Desktop/fluxdm/core/fluxdm-core` | Core binary the daemon spawns |
-| `fluxdm.core.socket-path` | `/tmp/fluxdm-<user>.sock` | IPC socket (one per user) |
+| `fluxdm.core.socket-path` | *(unset)* | IPC socket. Unset, it is `$XDG_RUNTIME_DIR/fluxdm/core.sock`, or `~/.fluxdm/run/core.sock` when that directory is not private; the directory is created mode `0700`. Set it only to put the socket somewhere else. |
 | `fluxdm.core.global-limit-bps` | `0` | Global speed cap |
 | `fluxdm.core.patience-seconds` | `300` | Rate-limit patience passed to the core |
 | `fluxdm.max-concurrent-downloads` | `4` | Downloads running at once; the rest wait in the queue |

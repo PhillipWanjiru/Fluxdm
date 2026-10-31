@@ -4,6 +4,9 @@
 # Tests for the Java daemon. They need only a JDK (21) — no Maven, no Spring
 # jars, no internet:
 #
+#   ApiSecurityTest       the local API's defences: the private socket directory, the token
+#                         file, the Host / Origin / token checks, the HTTP filter and the
+#                         STOMP interceptor (driven through stand-in servlet and message objects)
 #   QueueServiceTest      who may run: slots by id, priorities, idempotent release
 #   CoreIPCClientTest     the wire protocol: replies vs events, ordering, timeouts,
 #                         reconnects, protocol abuse
@@ -24,7 +27,7 @@
 # Options:
 #   --no-e2e     skip the suite that needs the real core binary and takes ~40 s
 #   --no-maven   skip the Maven compile
-#   --loop N     run the three fast suites N times (to flush out timing flakiness)
+#   --loop N     run the four fast suites N times (to flush out timing flakiness)
 #
 # The core binary is core/fluxdm-core (built with `make -C core` if missing); set
 # FLUXDM_CORE to test another build.
@@ -51,7 +54,7 @@ while [[ $# -gt 0 ]]; do
         --no-maven) MAVEN=0 ;;
         --loop)     LOOP="${2:-}"; shift
                     [[ "$LOOP" =~ ^[1-9][0-9]*$ ]] || { echo "--loop needs a positive number" >&2; exit 2; } ;;
-        -h|--help)  sed -n '2,29p' "$0"; exit 0 ;;
+        -h|--help)  sed -n '2,33p' "$0"; exit 0 ;;
         *)          echo "unknown option: $1" >&2; exit 2 ;;
     esac
     shift
@@ -85,7 +88,7 @@ else
 fi
 
 # ── Run the suites ────────────────────────────────────────────────────────────
-JAVA_OPTS=(-Dstdout.encoding=UTF-8 -Dstderr.encoding=UTF-8)
+JAVA_OPTS=(-Dstdout.encoding=UTF-8 -Dstderr.encoding=UTF-8 "-Dfluxdm.root=$ROOT")
 SUMMARY=(); FAILED=()
 
 run_suite() {                       # run_suite <Class> [args...]
@@ -108,6 +111,7 @@ run_suite() {                       # run_suite <Class> [args...]
 
 for ((i = 1; i <= LOOP; i++)); do
     [[ $LOOP -gt 1 ]] && info "round $i of $LOOP"
+    run_suite ApiSecurityTest
     run_suite QueueServiceTest
     run_suite CoreIPCClientTest
     run_suite DownloadServiceTest
