@@ -21,6 +21,11 @@ follows dependencies and what hurts most, and it changes when something is learn
 - [x] Unit, integration, behaviour and daemon test suites; ASan, UBSan and TSan builds
       ([TESTING.md](TESTING.md))
 
+**Unreleased** ([CHANGELOG.md](../CHANGELOG.md))
+
+- [x] Local API hardening: `Host` and `Origin` allow-lists, a bearer token on REST and STOMP, and a
+      private directory for the IPC socket and for `~/.fluxdm` ([SECURITY.md](../SECURITY.md))
+
 **Prototypes, not wired in yet:** the React / Electron UI, the Manifest V3 extension, the Python
 video grabber, and the C++ engine layer.
 
@@ -28,17 +33,11 @@ video grabber, and the C++ engine layer.
 
 In rough order. Each item says what it depends on, so the order is not arbitrary.
 
-1. **Harden the local API.** The daemon has no authentication and does not validate the `Host` or
-   `Origin` of requests, which matters for a service that writes files where it is told to
-   ([SECURITY.md](../SECURITY.md#known-limitations)). Validate `Host` against loopback names (this
-   defeats DNS rebinding), restrict the STOMP endpoint's origins, require a custom header or token on
-   state-changing requests (this defeats cross-site `POST`), and default the IPC socket to
-   `$XDG_RUNTIME_DIR` instead of `/tmp`. This comes first: every later item widens what the API can do.
-2. **A "waiting for server" state.** A download queued behind a host's connection limit currently
+1. **A "waiting for server" state.** A download queued behind a host's connection limit currently
    reports as running with no progress. The core knows exactly why it is waiting; it should say so.
    Needs one additional status value in the protocol (an additive change that older readers can
    ignore), a daemon status and a UI badge.
-3. **Connect the UI to the daemon.** The components and styles exist, and the downloads list polls
+2. **Connect the UI to the daemon.** The components and styles exist, and the downloads list polls
    `GET /api/downloads`, but the integration is unfinished. Concretely: give `react-scripts` the entry
    point it expects (`src/index.js`; the file is `main.jsx` today); map the daemon's integer statuses
    (0 to 4) to the states the UI filters on (`downloading`, `queued`, `complete`); replace the live-speed
@@ -46,21 +45,24 @@ In rough order. Each item says what it depends on, so the order is not arbitrary
    scheduler, settings and grabber views (the shell renders only the downloads list); use STOMP over
    SockJS (`/ws`, `/topic/downloads`) instead of polling, since the raw `useWebSocket` hook cannot speak
    it; and fix the `getStatus` call, which targets an endpoint that does not exist
-   (`/downloads/{id}`, not `/downloads/{id}/status`). Depends on nothing else, and it makes the project
-   usable by someone who does not use `curl`.
-4. **Per-segment progress.** The protocol reports aggregate progress only, so the UI's segment bars
+   (`/downloads/{id}`, not `/downloads/{id}/status`); and serve the built Electron app from a registered
+   `app://-/` URL (its requests carry `Origin: app://-`, which the daemon already allows) instead of
+   `file://`, whose requests carry `Origin: null` and are refused. Depends on nothing else, and it makes
+   the project usable by someone who does not use `curl`.
+3. **Per-segment progress.** The protocol reports aggregate progress only, so the UI's segment bars
    have nothing to draw. Add a per-segment breakdown to `STATUS` (a protocol change, so a version
    bump or an optional trailing section) and persist nothing: the core already tracks it.
-5. **Request headers in `START`.** Cookies, `Referer` and `User-Agent` are what make a browser
+4. **Request headers in `START`.** Cookies, `Referer` and `User-Agent` are what make a browser
    hand-off work for downloads behind a login. Today the protocol has no place for them. Needs a
    protocol extension and daemon support first, then:
-6. **Browser-extension hand-off.** Today the extension cancels the browser's download and nothing
+5. **Browser-extension hand-off.** Today the extension cancels the browser's download and nothing
    receives the URL: the native-messaging host only acknowledges messages. Pass URL and headers to the
-   daemon through the host, and show progress in the popup.
-7. **Grabber service.** Start and supervise the Python service from the daemon, align the two sides
+   daemon through the host (with the API token, which the host can read from `~/.fluxdm/api-token`), and
+   show progress in the popup.
+6. **Grabber service.** Start and supervise the Python service from the daemon, align the two sides
    (the daemon's bridge posts a JSON body; the grabber reads query parameters), and let a page URL
    turn into a format choice and then into an ordinary download.
-8. **Validate on every segment.** Send `If-Range` with the probe's validator and compare `ETag` /
+7. **Validate on every segment.** Send `If-Range` with the probe's validator and compare `ETag` /
    `Last-Modified` on each response, so a file that changes in place *without changing size* during a
    single run is detected. Today only a size change is caught outside a resume.
 
@@ -93,6 +95,6 @@ Stated plainly, so nobody has to find them the hard way.
 | `Retry-After` | Only the delta-seconds form is understood (the HTTP-date form is ignored), capped at one hour. |
 | Rate limiting | Host knowledge is per process and in memory, per `host:port`; the table holds 64 hosts. |
 | Progress | Aggregate only; no per-segment breakdown over IPC. |
-| API | REST and STOMP have no authentication and do not validate `Host` or `Origin`; keep them on `127.0.0.1` ([SECURITY.md](../SECURITY.md#known-limitations)). |
+| API | One token for all clients, readable by every program that runs as you; keep the API on `127.0.0.1` ([SECURITY.md](../SECURITY.md#known-limitations)). The packaged Electron app is refused until the UI is wired in properly. |
 | Engine layer | Not linked into the core. |
 | UI, extension, grabber | Prototypes. |

@@ -9,6 +9,44 @@ contain incompatible changes; they are listed under **Changed** or **Removed** a
 
 ## [Unreleased]
 
+### Added
+
+- Settings `fluxdm.api.allowed-hosts`, `fluxdm.api.allowed-origins`, `fluxdm.api.auth.enabled` (a
+  development switch that turns off the token check only; `Host` and `Origin` stay enforced) and
+  `fluxdm.api.token-file`.
+- The UI prototype sends the token: the Electron app reads it from `~/.fluxdm/api-token`, and `npm start`
+  in a browser takes it from `REACT_APP_FLUXDM_TOKEN`.
+- `tests/smoke_api.sh`, which starts the built daemon and checks the defences below over real HTTP and
+  WebSocket (CI runs it after the Maven build), and the `ApiSecurityTest` suite for the logic behind them.
+
+### Changed
+
+- **BREAKING:** requests to the REST API need the token and get `401` without it. STOMP clients send it as
+  the `Authorization` header of the `CONNECT` frame. For `curl`:
+  `-H "Authorization: Bearer $(cat ~/.fluxdm/api-token)"`. Any other client of the API, such as the browser
+  extension skeleton, stops working until it sends the token.
+- **BREAKING:** a request whose `Host` is not `127.0.0.1`, `localhost` or `[::1]`, or whose `Origin` is not on
+  the allow-list, gets `403` even with the token. The WebSocket endpoint used to accept any origin, and CORS
+  preflights now allow only the `Authorization`, `Content-Type` and `Accept` headers.
+- **BREAKING:** the IPC socket moved (see Security). `fluxdm.core.socket-path` is unset by default and, when
+  set, is used as given; `fluxdm-core --sock` defaults the same way. The core and the daemon must agree, so
+  upgrade them together, and stop a core that is still running from an older daemon (`pkill -x fluxdm-core`):
+  the new daemon does not look under `/tmp`.
+
+### Security
+
+- **The local API checks where every request comes from.** `Host` must be a loopback name, which stops DNS
+  rebinding. `Origin`, when a request has one, must be on an allow-list (the React dev server and the Electron
+  app by default; wildcards and `null` are refused), which stops cross-site requests and WebSocket hijacking by
+  web pages. Every REST call, and the STOMP `CONNECT` frame, must carry `Authorization: Bearer <token>`: a
+  random 256-bit secret in `~/.fluxdm/api-token` (mode `0600`), created on the first start. It keeps out web
+  pages and other accounts, not other programs running as you. See [SECURITY.md](SECURITY.md).
+- **The IPC socket no longer lives in `/tmp`.** It is `core.sock` in `$XDG_RUNTIME_DIR/fluxdm/` or, if that is
+  not a private directory of yours, in `~/.fluxdm/run/`: a directory created mode `0700` and refused if it is
+  a link, a file or somebody else's. Another local user can no longer plant a socket for the daemon to adopt.
+- **`~/.fluxdm` is mode `0700`.** It is created that way, and an existing one that was open is closed at start.
+  The database in it lists every URL and destination path.
+
 ## [0.1.0] - 2026-10-28
 
 First public release. The C core and the Java daemon work end to end and are heavily tested; the
