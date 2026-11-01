@@ -714,10 +714,16 @@ def test_rate_limit_queue():
     # 3. The log. 3 downloads x 8 segments against a 2-connection server: 20-odd segments are turned
     #    away within a second. The user should read that the host started refusing, and where its
     #    allowance settled — once each, not one line for every refused segment.
+    #    The server takes 0.5 s to say no, as a server across a network does: the whole burst is on the
+    #    wire before the first refusal comes back. With an instant refusal on loopback the size of the
+    #    wave depends on scheduling — the faster the core reacts, the fewer segments it has sent — and
+    #    a fast machine saw 2 refusals: the gate had learnt the limit at once, which is what it is for,
+    #    but a scenario that small says nothing about the log. Now one download's burst alone is
+    #    certain to be refused (8 segments, 2 of them served); the others usually add to it.
     core = fresh_core()
     c = core.connect()
     try:
-        site = Site(SRV, max_active=2, chunk=32768, delay=0.02)
+        site = Site(SRV, max_active=2, chunk=32768, delay=0.02, limit_delay=0.5)
         jobs = []
         for _ in range(3):
             dl, dest = nid(), outpath()
@@ -726,7 +732,7 @@ def test_rate_limit_queue():
         for n, (dl, dest) in enumerate(jobs, 1):
             verify(f"3 downloads x 8 segments through a 2-connection server: #{n} is intact", c, dl,
                    c.wait_terminal(dl, 120), dest, "rl_a.bin")
-        expect(site.refused >= 8, f"...the wave was real ({site.refused} refusals)")
+        expect(site.refused >= 6, f"...the wave was real ({site.refused} refusals)")
         log = core.log_text().splitlines()
         started = [l for l in log if "is refusing connections" in l]
         settled = [l for l in log if "using at most" in l]

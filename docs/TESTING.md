@@ -158,7 +158,9 @@ flagged as events, events are, and no frame is corrupt. A `Site` can:
 - serve files with or without `Range`, with keep-alive, chunked or unknown-length bodies, at a chosen
   chunk size and delay per chunk;
 - cap concurrent connections (`max_active`) and answer the surplus with `429` or `503` plus
-  `Retry-After` (`limit_status`);
+  `Retry-After` (`limit_status`), after a pause if asked (`limit_delay`: a server across a network takes
+  a moment to say no, so a client's whole burst is on the wire before the first refusal comes back; on
+  loopback an instant refusal races the burst and the count depends on scheduling);
 - hold every connection open after N bytes until an event is set (`hold_after`, `release`);
 - follow a **script** of per-request behaviours (`script=[None, None, (429, None), ...]`), reset
   connections mid-body, redirect, demand Basic credentials, drop or reject `HEAD`, and serve a
