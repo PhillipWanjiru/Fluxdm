@@ -627,6 +627,10 @@ class Site:
       max_active  serve at most N GETs at the same time; the rest get `limit_status`
                   ((code, retry_after|None), default (429, None)) — a connection cap.
                   The Site counts them: refused, peak_active.
+      limit_delay wait this many seconds before answering a refused GET (default 0). A server across
+                  a network takes a moment to say no, so a client's whole burst is on the wire before
+                  the first refusal comes back; on loopback an instant refusal races the burst, and
+                  how many requests it caught depends on scheduling.
       reset_after reset the connection after N body bytes ...
       reset_times ... on the first K matching requests (default 1)
       hold_after  stall the body after N bytes until site.release is set
@@ -638,7 +642,7 @@ class Site:
                     chunked=False, no_length=False, auth=None, redirect=None, status=None,
                     status_times=None, status_after=0, reset_after=None, reset_times=1,
                     hold_after=None, etag=None, last_modified=True,
-                    max_active=None, limit_status=(429, None), script=None)
+                    max_active=None, limit_status=(429, None), limit_delay=0.0, script=None)
 
     def __init__(self, root, tls=None, **defaults):
         self.root = Path(root)
@@ -770,6 +774,8 @@ class Site:
                     hdrs = [("Content-Length", "0")]
                     if retry_after is not None:
                         hdrs.append(("Retry-After", str(retry_after)))
+                    if o["limit_delay"]:
+                        time.sleep(o["limit_delay"])             # a server that takes a moment to say no
                     self._reply(code, hdrs, o)
                     return
                 try:
