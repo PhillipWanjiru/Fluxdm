@@ -4,6 +4,7 @@ const TYPES = {
   iso:     {label:"ISO",bg:"#1a2a3a",color:"#4ab3f4"},
   archive: {label:"ZIP",bg:"#2a1a10",color:"#f4a44a"},
   video:   {label:"VID",bg:"#1a2a1a",color:"#4af48a"},
+  audio:   {label:"AUD",bg:"#2a2a10",color:"#f4d44a"},
   pdf:     {label:"PDF",bg:"#2a1a1a",color:"#f44a4a"},
   default: {label:"FILE",bg:"#1a1a2a",color:"#9a8af4"},
 };

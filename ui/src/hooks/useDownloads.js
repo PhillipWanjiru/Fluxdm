@@ -1,13 +1,18 @@
-/* FluxDM — hooks/useDownloads.js */
+/* FluxDM — hooks/useDownloads.js
+ * Keeps the store in step with the daemon by asking for the whole list every second. Replaced by the push
+ * feed (STOMP over SockJS) in a later commit of this series. */
 import { useEffect } from "react";
 import { useDispatch } from "react-redux";
-import { set } from "../store/downloadsSlice";
+import { received } from "../store/downloadsSlice";
+import { fromDaemon } from "../model/downloads";
 import { getAll } from "../api/downloads";
+
 export function useDownloads() {
   const dispatch = useDispatch();
   useEffect(() => {
-    getAll().then(r => dispatch(set(r.data)));
-    const id = setInterval(() => getAll().then(r => dispatch(set(r.data))), 1000);
-    return () => clearInterval(id);
+    const load = () => getAll().then((r) => dispatch(received(r.data.map(fromDaemon)))).catch(() => {});
+    load();
+    const timer = setInterval(load, 1000);
+    return () => clearInterval(timer);
   }, [dispatch]);
 }

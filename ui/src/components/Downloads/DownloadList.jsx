@@ -7,18 +7,18 @@ import SpeedGraph from "../Shared/SpeedGraph";
 import { useDownloads } from "../../hooks/useDownloads";
 import { useSpeedData } from "../../hooks/useSpeedData";
 import AddDownloadModal from "../Modals/AddDownloadModal";
+import { selectCounts, selectTab } from "../../store/downloadsSlice";
+
+const TABS = ["active","queued","complete","failed"];
 
 export default function DownloadList() {
   const [tab, setTab]         = useState("active");
   const [showAdd, setShowAdd] = useState(false);
-  const downloads             = useSelector(s => s.downloads);
+  const counts                = useSelector(selectCounts);
+  const filtered              = useSelector(s => selectTab(s, tab));
   const speedData             = useSpeedData();
   useDownloads();
 
-  const active    = downloads.filter(d=>d.status==="downloading"||d.status==="paused");
-  const queued    = downloads.filter(d=>d.status==="queued");
-  const complete  = downloads.filter(d=>d.status==="complete");
-  const filtered  = tab==="active"?active:tab==="queued"?queued:complete;
   const totalSpd  = speedData[speedData.length-1]?.speed||0;
 
   return (
@@ -26,11 +26,11 @@ export default function DownloadList() {
       {showAdd&&<AddDownloadModal onClose={()=>setShowAdd(false)}/>}
       <div style={{padding:"0 20px",height:52,display:"flex",alignItems:"center",justifyContent:"space-between",borderBottom:"1px solid var(--border)"}}>
         <div style={{display:"flex",gap:20}}>
-          {["active","queued","complete"].map(t=>(
+          {TABS.map(t=>(
             <button key={t} onClick={()=>setTab(t)} style={{background:"none",border:"none",
               color:tab===t?"#fff":"var(--text-dim)",fontSize:11,cursor:"pointer",fontFamily:"inherit",
               letterSpacing:1,padding:"0 0 14px",borderBottom:`2px solid ${tab===t?"var(--green)":"transparent"}`,textTransform:"uppercase"}}>
-              {t}
+              {t}<span style={{marginLeft:6,color:t==="failed"&&counts.failed>0?"var(--red)":"var(--text-dim)"}}>{counts[t]}</span>
             </button>
           ))}
         </div>
@@ -48,10 +48,10 @@ export default function DownloadList() {
       </div>
 
       <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:10,margin:"12px 20px 0"}}>
-        <StatCard label="ACTIVE"     value={active.length}   color="var(--green)"/>
-        <StatCard label="QUEUED"     value={queued.length}   color="var(--amber)"/>
-        <StatCard label="COMPLETED"  value={complete.length} color="var(--blue)"/>
-        <StatCard label="TOTAL"      value={downloads.length}color="var(--purple)"/>
+        <StatCard label="ACTIVE"     value={counts.active}   color="var(--green)"/>
+        <StatCard label="QUEUED"     value={counts.queued}   color="var(--amber)"/>
+        <StatCard label="COMPLETED"  value={counts.complete} color="var(--blue)"/>
+        <StatCard label="TOTAL"      value={counts.total}    color="var(--purple)"/>
       </div>
 
       <div style={{flex:1,overflowY:"auto",padding:"12px 20px 20px"}}>

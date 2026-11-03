@@ -1,0 +1,84 @@
+import React from "react";
+import { render, screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { Provider } from "react-redux";
+import { makeStore } from "../../store";
+import DownloadList from "./DownloadList";
+import { getAll } from "../../api/downloads";
+import { daemonList } from "../../testing/fixtures";
+
+jest.mock("../../api/downloads");
+
+function renderList(downloads = daemonList()) {
+  getAll.mockResolvedValue({ data: downloads });
+  return render(
+    <Provider store={makeStore()}>
+      <DownloadList />
+    </Provider>
+  );
+}
+
+const tab = (name) => screen.getByRole("button", { name: new RegExp(`^${name}\\s*\\d+$`, "i") });
+
+describe("the downloads list", () => {
+  test("shows the daemon's downloads under the tab their state belongs to", async () => {
+    renderList();
+
+    // active: the running and the paused download, newest first
+    expect(await screen.findByText("a.iso")).toBeInTheDocument();
+    expect(screen.getByText("b.zip")).toBeInTheDocument();
+    expect(screen.queryByText("c.mp4")).not.toBeInTheDocument();
+    expect(screen.queryByText("d.pdf")).not.toBeInTheDocument();
+    expect(screen.queryByText("e.bin")).not.toBeInTheDocument();
+
+    const user = userEvent.setup();
+    await user.click(tab("queued"));
+    expect(screen.getByText("c.mp4")).toBeInTheDocument();
+    expect(screen.queryByText("a.iso")).not.toBeInTheDocument();
+
+    await user.click(tab("complete"));
+    expect(screen.getByText("d.pdf")).toBeInTheDocument();
+    expect(screen.getByText("100%")).toBeInTheDocument();
+
+    await user.click(tab("failed"));
+    expect(screen.getByText("e.bin")).toBeInTheDocument();
+    expect(screen.getByText("FAILED")).toBeInTheDocument();
+    expect(screen.getByText("connection reset by peer")).toBeInTheDocument();
+  });
+
+  test("counts each tab", async () => {
+    renderList();
+    await screen.findByText("a.iso");
+
+    expect(tab("active")).toHaveTextContent("2");
+    expect(tab("queued")).toHaveTextContent("1");
+    expect(tab("complete")).toHaveTextContent("1");
+    expect(tab("failed")).toHaveTextContent("1");
+  });
+
+  test("says so when there is nothing to show", async () => {
+    renderList([]);
+    expect(await screen.findByText("NO DOWNLOADS IN THIS VIEW")).toBeInTheDocument();
+    expect(tab("active")).toHaveTextContent("0");
+  });
+
+  test("a running download shows its speed and the time left; a paused one does not", async () => {
+    renderList();
+    const running = await screen.findByTestId("download-1");
+    expect(within(running).getByText("100 B/s")).toBeInTheDocument();
+    expect(within(running).getByText(/8s left/)).toBeInTheDocument();
+    expect(within(running).getByText("ACTIVE")).toBeInTheDocument();
+
+    const paused = screen.getByTestId("download-2");
+    expect(within(paused).getByText("PAUSED")).toBeInTheDocument();
+    expect(within(paused).queryByText(/left/)).not.toBeInTheDocument();
+  });
+
+  test("a card opens to show where the file goes", async () => {
+    renderList();
+    const user = userEvent.setup();
+    await user.click(await screen.findByText("a.iso"));
+    expect(screen.getByText("/d/a.iso")).toBeInTheDocument();
+    expect(screen.getByText("example.com")).toBeInTheDocument();
+  });
+});
