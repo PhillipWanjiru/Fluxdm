@@ -5,12 +5,13 @@ import { Provider } from "react-redux";
 import { makeStore } from "../../store";
 import DownloadList from "./DownloadList";
 import { getAll } from "../../api/downloads";
+import { fromDaemon } from "../../model/downloads";
 import { daemonList } from "../../testing/fixtures";
 
 jest.mock("../../api/downloads");
 
-function renderList(downloads = daemonList()) {
-  getAll.mockResolvedValue({ data: downloads });
+function renderList(downloads = daemonList().map(fromDaemon)) {
+  getAll.mockResolvedValue(downloads);
   return render(
     <Provider store={makeStore()}>
       <DownloadList />

@@ -5,10 +5,14 @@
  *   - in a plain browser while developing:  REACT_APP_FLUXDM_TOKEN="$(cat ~/.fluxdm/api-token)" npm start
  *     (a development server only: the variable is ignored in a production build, so a build never carries it).
  * It is read once, and again after a 401, which is what the daemon answers if it was started after the UI or
- * the token file was deleted to rotate the token. */
+ * the token file was deleted to rotate the token.
+ *
+ * A failed call rejects with an ApiError (api/errors.js), never with axios' own error. */
 import axios from "axios";
+import { API_BASE } from "./config";
+import { toApiError } from "./errors";
 
-export const client = axios.create({ baseURL: "http://localhost:7171/api", timeout: 10000 });
+export const client = axios.create({ baseURL: API_BASE, timeout: 10000 });
 
 let cached = "";
 
@@ -37,7 +41,6 @@ client.interceptors.response.use(
         return client(config);
       }
     }
-    console.error("[FluxDM]", error);
-    return Promise.reject(error);
+    return Promise.reject(toApiError(error));
   }
 );

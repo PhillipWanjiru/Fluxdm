@@ -9,7 +9,7 @@ export default function VideoGrabber() {
   const [modal,setModal]   = useState(false);
   const handleDetect = async () => {
     if(!url) return; setLoad(true);
-    try { const r=await detect(url); setMeta(r.data); setModal(true); } finally { setLoad(false); }
+    try { setMeta(await detect(url)); setModal(true); } finally { setLoad(false); }
   };
   return (
     <div style={{padding:24}}>

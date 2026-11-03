@@ -83,7 +83,7 @@ describe("api client token handling", () => {
     const client = loadClient();
     const seen = fakeDaemon(client, () => TOKEN_B);
 
-    await expect(client.get("/health")).rejects.toMatchObject({ response: { status: 401 } });
+    await expect(client.get("/health")).rejects.toMatchObject({ name: "ApiError", kind: "unauthorized", status: 401 });
     expect(seen).toEqual([`Bearer ${TOKEN_A}`]);
   });
 
@@ -92,7 +92,7 @@ describe("api client token handling", () => {
     const client = loadClient();
     const seen = fakeDaemon(client, () => TOKEN_A);
 
-    await expect(client.get("/health")).rejects.toMatchObject({ response: { status: 401 } });
+    await expect(client.get("/health")).rejects.toMatchObject({ name: "ApiError", kind: "unauthorized", status: 401 });
     expect(seen).toEqual([null]);
   });
 
@@ -109,7 +109,7 @@ describe("api client token handling", () => {
       process.env.NODE_ENV = "production";
       client = loadClient();
       seen = fakeDaemon(client, () => TOKEN_A);
-      await expect(client.get("/health")).rejects.toMatchObject({ response: { status: 401 } });
+      await expect(client.get("/health")).rejects.toMatchObject({ name: "ApiError", kind: "unauthorized", status: 401 });
       expect(seen).toEqual([null]);
     } finally {
       process.env.NODE_ENV = nodeEnv;

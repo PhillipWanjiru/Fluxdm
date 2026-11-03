@@ -4,13 +4,12 @@
 import { useEffect } from "react";
 import { useDispatch } from "react-redux";
 import { received } from "../store/downloadsSlice";
-import { fromDaemon } from "../model/downloads";
 import { getAll } from "../api/downloads";
 
 export function useDownloads() {
   const dispatch = useDispatch();
   useEffect(() => {
-    const load = () => getAll().then((r) => dispatch(received(r.data.map(fromDaemon)))).catch(() => {});
+    const load = () => getAll().then((list) => dispatch(received(list))).catch(() => {});
     load();
     const timer = setInterval(load, 1000);
     return () => clearInterval(timer);
