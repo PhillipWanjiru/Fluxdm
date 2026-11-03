@@ -9,5 +9,5 @@ export function useDownloads() {
     getAll().then(r => dispatch(set(r.data)));
     const id = setInterval(() => getAll().then(r => dispatch(set(r.data))), 1000);
     return () => clearInterval(id);
-  }, []);
+  }, [dispatch]);
 }

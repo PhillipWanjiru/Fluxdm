@@ -1,4 +1,4 @@
-/* FluxDM — src/main.jsx */
+/* FluxDM — src/index.js: the entry point react-scripts expects */
 import React from "react";
 import { createRoot } from "react-dom/client";
 import { Provider } from "react-redux";

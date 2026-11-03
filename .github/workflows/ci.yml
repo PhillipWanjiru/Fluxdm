@@ -136,3 +136,30 @@ jobs:
 
       - name: Build and run the C++ engine tests
         run: bash tests/run_engine_tests.sh
+
+  ui:
+    name: ui
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      # Neither the tests nor the build need Electron's ~100 MB binary.
+      ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+
+      - name: Install dependencies (the exact versions in package-lock.json)
+        run: npm ci --no-audit --no-fund --prefix ui
+
+      # Actions sets CI=true: Jest runs once instead of watching.
+      - name: Unit and component tests
+        run: npm test --prefix ui -- --watchAll=false
+
+      # CI=true also makes the build treat lint warnings as errors.
+      - name: Production build
+        run: npm run build --prefix ui

@@ -1,14 +1,56 @@
 {
-  "name": "fluxdm-ui","version": "0.1.0","private": true,"main": "electron/main.js",
+  "name": "fluxdm-ui",
+  "version": "0.1.0",
+  "private": true,
+  "description": "FluxDM desktop UI (React in an Electron shell)",
+  "main": "electron/main.js",
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
-    "start": "react-scripts start","build": "react-scripts build",
-    "electron": "electron .","electron:dev": "concurrently \"npm start\" \"wait-on http://localhost:3000 && electron .\""
+    "start": "react-scripts start",
+    "build": "INLINE_RUNTIME_CHUNK=false react-scripts build",
+    "test": "react-scripts test",
+    "electron": "electron .",
+    "electron:dev": "concurrently \"npm start\" \"wait-on http://localhost:3000 && electron .\""
   },
   "dependencies": {
-    "axios": "^1.6.0","react": "^18.2.0","react-dom": "^18.2.0",
-    "recharts": "^2.10.0","@reduxjs/toolkit": "^2.2.0","react-redux": "^9.1.0"
+    "@reduxjs/toolkit": "^2.2.0",
+    "axios": "^1.6.0",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "react-redux": "^9.1.0",
+    "recharts": "^2.10.0"
   },
   "devDependencies": {
-    "electron": "^29.0.0","react-scripts": "5.0.1","concurrently": "^8.2.0","wait-on": "^7.2.0"
+    "@testing-library/dom": "^10.4.0",
+    "@testing-library/jest-dom": "^6.4.0",
+    "@testing-library/react": "^16.0.0",
+    "@testing-library/user-event": "^14.5.0",
+    "concurrently": "^8.2.0",
+    "electron": "^29.0.0",
+    "react-scripts": "5.0.1",
+    "typescript": "^4.9.5",
+    "wait-on": "^7.2.0"
+  },
+  "browserslist": {
+    "production": [
+      "chrome >= 120"
+    ],
+    "development": [
+      "last 1 chrome version",
+      "last 1 firefox version"
+    ]
+  },
+  "jest": {
+    "moduleNameMapper": {
+      "^axios$": "axios/dist/node/axios.cjs"
+    }
+  },
+  "eslintConfig": {
+    "extends": [
+      "react-app",
+      "react-app/jest"
+    ]
   }
 }
