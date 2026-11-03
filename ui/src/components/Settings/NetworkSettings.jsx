@@ -1,6 +1,7 @@
 /* FluxDM — Settings/NetworkSettings.jsx */
 import React from "react";
 import { useSettings } from "../../hooks/useSettings";
+import { SEGMENT_CHOICES } from "../../model/destination";
 export default function NetworkSettings() {
   const { settings, update } = useSettings();
   return (
@@ -11,10 +12,10 @@ export default function NetworkSettings() {
           style={{width:"100%",background:"var(--bg-panel)",border:"1px solid var(--border)",borderRadius:6,padding:"9px 12px",color:"#fff",fontFamily:"monospace",fontSize:12,outline:"none"}}/>
       </div>
       <div>
-        <label style={{fontSize:10,color:"var(--text-dim)",letterSpacing:1,display:"block",marginBottom:6}}>DEFAULT SEGMENTS</label>
-        <div style={{display:"flex",gap:4}}>
-          {[4,8,16,32].map(n=>(
-            <button key={n} onClick={()=>update({defaultSegments:n})} style={{flex:1,padding:"8px 0",background:settings.defaultSegments===n?"rgba(74,244,138,0.1)":"var(--bg-panel)",border:`1px solid ${settings.defaultSegments===n?"var(--green)":"var(--border)"}`,borderRadius:6,color:settings.defaultSegments===n?"var(--green)":"var(--text-dim)",cursor:"pointer",fontFamily:"monospace",fontSize:11}}>{n}×</button>
+        <span style={{fontSize:10,color:"var(--text-dim)",letterSpacing:1,display:"block",marginBottom:6}}>DEFAULT SEGMENTS</span>
+        <div role="group" aria-label="Default segments" style={{display:"flex",gap:4}}>
+          {SEGMENT_CHOICES.map(n=>(
+            <button key={n} type="button" onClick={()=>update({defaultSegments:n})} aria-pressed={settings.defaultSegments===n} style={{flex:1,padding:"8px 0",background:settings.defaultSegments===n?"rgba(74,244,138,0.1)":"var(--bg-panel)",border:`1px solid ${settings.defaultSegments===n?"var(--green)":"var(--border)"}`,borderRadius:6,color:settings.defaultSegments===n?"var(--green)":"var(--text-dim)",cursor:"pointer",fontFamily:"monospace",fontSize:11}}>{n}×</button>
           ))}
         </div>
       </div>
