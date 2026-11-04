@@ -1,4 +1,4 @@
-import { DaemonStatus, State, TABS, applyEvent, etaFromSpeed, fileTypeOf, fromDaemon, percentOf, stateOf } from "./downloads";
+import { DaemonStatus, State, TABS, applyEvent, etaFromSpeed, fileTypeOf, fromDaemon, mergeSnapshot, percentOf, stateOf } from "./downloads";
 import { daemonDownload } from "../testing/fixtures";
 
 const model = (over) => fromDaemon(daemonDownload(over));
@@ -201,5 +201,47 @@ describe("applyEvent", () => {
     const frozen = Object.freeze({ ...running() });
     expect(() => applyEvent(frozen, { type: "progress", id: 1, totalBytes: 1000, downloadedBytes: 200, speedBps: 1 })).not.toThrow();
     expect(() => applyEvent(frozen, { type: "state", id: 1, status: DaemonStatus.PAUSED })).not.toThrow();
+  });
+});
+
+describe("mergeSnapshot", () => {
+  const live = (over) => model({ status: DaemonStatus.RUNNING, totalSize: 1000, ...over });
+
+  test("keeps the further-along progress of a download that is running in both", () => {
+    // the UI saw 700 bytes in a progress event; the database was last written at 400
+    const known = { ...live({ downloaded: 250 }), downloaded: 700, speedBps: 55, etaSeconds: 6, activeSegments: 3 };
+    const fresh = live({ downloaded: 400, speedBps: 100, segments: 16 });
+
+    expect(mergeSnapshot(known, fresh)).toEqual({
+      ...fresh,
+      downloaded: 700,
+      speedBps: 55,
+      etaSeconds: 6,
+      activeSegments: 3,
+    });
+  });
+
+  test("takes the snapshot when it is further along, or equal", () => {
+    const known = { ...live({ downloaded: 250 }), downloaded: 300 };
+    const fresh = live({ downloaded: 400 });
+    expect(mergeSnapshot(known, fresh)).toBe(fresh);
+    expect(mergeSnapshot({ ...known, downloaded: 400 }, fresh)).toBe(fresh);
+  });
+
+  test("takes the snapshot's word for everything else", () => {
+    const fresh = live({ downloaded: 100 });
+    expect(mergeSnapshot(undefined, fresh)).toBe(fresh); // not known yet
+    // paused, queued, finished or failed in either: the state changed, so it is a new situation
+    const furtherAlong = { ...live({ downloaded: 100 }), downloaded: 900 };
+    expect(mergeSnapshot({ ...furtherAlong, state: State.PAUSED }, fresh)).toBe(fresh);
+    expect(mergeSnapshot(furtherAlong, model({ status: DaemonStatus.PAUSED, downloaded: 100 }))).toMatchObject({ downloaded: 100 });
+    expect(mergeSnapshot(furtherAlong, model({ status: DaemonStatus.DONE, totalSize: 1000, downloaded: 1000 }))).toMatchObject({ state: State.COMPLETE });
+    expect(mergeSnapshot(furtherAlong, model({ status: DaemonStatus.ERROR, errorMessage: "boom" }))).toMatchObject({ state: State.FAILED, error: "boom" });
+  });
+
+  test("does not change what it is given", () => {
+    const known = Object.freeze({ ...live({ downloaded: 250 }), downloaded: 700 });
+    const fresh = Object.freeze(live({ downloaded: 400 }));
+    expect(() => mergeSnapshot(known, fresh)).not.toThrow();
   });
 });

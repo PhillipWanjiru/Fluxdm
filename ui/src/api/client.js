@@ -4,8 +4,8 @@
  *   - in the Electron app, the main process reads the file (window.fluxdm.apiToken(), see electron/preload.js);
  *   - in a plain browser while developing:  REACT_APP_FLUXDM_TOKEN="$(cat ~/.fluxdm/api-token)" npm start
  *     (a development server only: the variable is ignored in a production build, so a build never carries it).
- * It is read once, and again after a 401, which is what the daemon answers if it was started after the UI or
- * the token file was deleted to rotate the token.
+ * It is read once, and again after a 401 (or after the live feed was refused, api/live.js), which is what the
+ * daemon answers if it was started after the UI or the token file was deleted to rotate the token.
  *
  * A failed call rejects with an ApiError (api/errors.js), never with axios' own error. */
 import axios from "axios";
@@ -22,9 +22,21 @@ async function readToken() {
   return fromElectron || fromEnv;
 }
 
-client.interceptors.request.use(async (config) => {
+/* The token to send now: the one read before, or read it if there is none yet ("" when there is no token). */
+export async function currentToken() {
   if (!cached) cached = await readToken();
-  if (cached) config.headers.Authorization = `Bearer ${cached}`;
+  return cached;
+}
+
+/* Reads the token again, after the daemon refused the one in use, and keeps what is there now. */
+export async function refreshToken() {
+  cached = await readToken();
+  return cached;
+}
+
+client.interceptors.request.use(async (config) => {
+  const token = await currentToken();
+  if (token) config.headers.Authorization = `Bearer ${token}`;
   return config;
 });
 
@@ -33,9 +45,9 @@ client.interceptors.response.use(
   async (error) => {
     const config = error.config;
     if (error.response && error.response.status === 401 && config && !config.retriedWithNewToken) {
-      const fresh = await readToken();
-      if (fresh && fresh !== cached) {
-        cached = fresh;
+      const before = cached;
+      const fresh = await refreshToken();
+      if (fresh && fresh !== before) {
         config.retriedWithNewToken = true;
         config.headers.Authorization = `Bearer ${fresh}`;
         return client(config);

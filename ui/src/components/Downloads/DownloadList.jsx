@@ -4,7 +4,6 @@ import { useSelector } from "react-redux";
 import DownloadItem from "./DownloadItem";
 import StatCard from "../Shared/StatCard";
 import SpeedGraph from "../Shared/SpeedGraph";
-import { useDownloads } from "../../hooks/useDownloads";
 import { useSpeedData } from "../../hooks/useSpeedData";
 import AddDownloadModal from "../Modals/AddDownloadModal";
 import { selectCounts, selectTab } from "../../store/downloadsSlice";
@@ -17,7 +16,6 @@ export default function DownloadList() {
   const counts                = useSelector(selectCounts);
   const filtered              = useSelector(s => selectTab(s, tab));
   const speedData             = useSpeedData();
-  useDownloads();
 
   const totalSpd  = speedData[speedData.length-1]?.speed||0;
 

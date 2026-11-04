@@ -6,6 +6,7 @@
  *
  *   JSON of GET /api/downloads and of the POST calls   ->  fromDaemon()
  *   push events on /topic/downloads                    ->  applyEvent()
+ *   a new snapshot of the list, over what is known     ->  mergeSnapshot()
  *
  * Both are pure functions: they never change what they are given.
  */
@@ -115,6 +116,23 @@ export function fromDaemon(json) {
     speedBps,
     etaSeconds: live ? etaFromSpeed(totalSize, downloaded, speedBps) : null,
     activeSegments: 0,
+  };
+}
+
+/* A download of a new snapshot of the list, given what the UI already knows of it (`known`, or undefined). The
+ * daemon saves progress at most every two seconds, so a snapshot can be older than the last progress event the UI
+ * received: for a download that is running in both, the further-along numbers are kept instead of moving the bar
+ * back until the next event. Anything else is the snapshot's word. */
+export function mergeSnapshot(known, fresh) {
+  if (!known || known.state !== State.DOWNLOADING || fresh.state !== State.DOWNLOADING) return fresh;
+  if (known.downloaded <= fresh.downloaded) return fresh;
+  return {
+    ...fresh,
+    totalSize: fresh.totalSize || known.totalSize,
+    downloaded: known.downloaded,
+    speedBps: known.speedBps,
+    etaSeconds: known.etaSeconds,
+    activeSegments: known.activeSegments,
   };
 }
 

@@ -16,6 +16,17 @@ describe("downloads slice", () => {
     expect(idsOf(replaced)).toEqual([9]);
   });
 
+  test("a new list does not move the bar of a running download back, and still removes what is gone", () => {
+    let state = reducer(initial(), received([fromDaemon(daemonDownload({ id: 1, status: 1, totalSize: 1000, downloaded: 250 })), fromDaemon(daemonDownload({ id: 2 }))]));
+    state = reducer(state, eventReceived({ type: "progress", id: 1, totalBytes: 1000, downloadedBytes: 700, speedBps: 5, etaSeconds: 3, activeSegments: 2 }));
+
+    // the database was last written at 400, and download 2 was deleted by another client
+    state = reducer(state, received([fromDaemon(daemonDownload({ id: 1, status: 1, totalSize: 1000, downloaded: 400 }))]));
+
+    expect(idsOf(state)).toEqual([1]);
+    expect(state.entities[1]).toMatchObject({ downloaded: 700, speedBps: 5, etaSeconds: 3, activeSegments: 2 });
+  });
+
   test("upserted adds a download and then updates it in place", () => {
     let state = reducer(initial(), upserted(fromDaemon(daemonDownload({ id: 2, status: 0 }))));
     expect(state.entities[2].state).toBe(State.QUEUED);

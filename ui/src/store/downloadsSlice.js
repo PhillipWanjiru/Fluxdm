@@ -2,13 +2,14 @@
  * The downloads the daemon knows about, as the UI model (model/downloads.js), newest first.
  *
  * The actions take what the model produced, never the daemon's raw JSON:
- *   received       the whole list (first load, and after a reconnect to catch up on what was missed)
+ *   received       the whole list (first load, a catch-up after a reconnect, and the periodic check; progress that is
+ *                  further along in the store than in the list is kept, see mergeSnapshot)
  *   upserted       one download the daemon just returned (added, paused, resumed, limited)
  *   removed        one download the user removed
  *   eventReceived  one push event from /topic/downloads
  */
 import { createEntityAdapter, createSelector, createSlice } from "@reduxjs/toolkit";
-import { TABS, applyEvent } from "../model/downloads";
+import { TABS, applyEvent, mergeSnapshot } from "../model/downloads";
 
 const adapter = createEntityAdapter({ sortComparer: (a, b) => b.id - a.id });
 
@@ -17,7 +18,7 @@ const slice = createSlice({
   initialState: adapter.getInitialState(),
   reducers: {
     received: (state, action) => {
-      adapter.setAll(state, action.payload);
+      adapter.setAll(state, action.payload.map((d) => mergeSnapshot(state.entities[d.id], d)));
     },
     upserted: (state, action) => {
       adapter.upsertOne(state, action.payload);

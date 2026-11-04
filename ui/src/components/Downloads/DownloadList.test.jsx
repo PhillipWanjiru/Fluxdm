@@ -4,16 +4,16 @@ import userEvent from "@testing-library/user-event";
 import { Provider } from "react-redux";
 import { makeStore } from "../../store";
 import DownloadList from "./DownloadList";
-import { getAll } from "../../api/downloads";
+import { received } from "../../store/downloadsSlice";
 import { fromDaemon } from "../../model/downloads";
 import { daemonList } from "../../testing/fixtures";
 
-jest.mock("../../api/downloads");
-
+/* The list shows what is in the store; filling it is the live sync's job (store/liveSync.js). */
 function renderList(downloads = daemonList().map(fromDaemon)) {
-  getAll.mockResolvedValue(downloads);
+  const store = makeStore();
+  store.dispatch(received(downloads));
   return render(
-    <Provider store={makeStore()}>
+    <Provider store={store}>
       <DownloadList />
     </Provider>
   );
