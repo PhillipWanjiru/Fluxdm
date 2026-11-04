@@ -4,9 +4,10 @@ import { useSelector } from "react-redux";
 import DownloadItem from "./DownloadItem";
 import StatCard from "../Shared/StatCard";
 import SpeedGraph from "../Shared/SpeedGraph";
-import { useSpeedData } from "../../hooks/useSpeedData";
+import { useSpeedHistory } from "../../hooks/useSpeedHistory";
+import { formatSpeed } from "../../model/format";
 import AddDownloadModal from "../Modals/AddDownloadModal";
-import { selectCounts, selectTab } from "../../store/downloadsSlice";
+import { selectCounts, selectTab, selectTotalSpeed } from "../../store/downloadsSlice";
 
 const TABS = ["active","queued","complete","failed"];
 
@@ -15,9 +16,8 @@ export default function DownloadList() {
   const [showAdd, setShowAdd] = useState(false);
   const counts                = useSelector(selectCounts);
   const filtered              = useSelector(s => selectTab(s, tab));
-  const speedData             = useSpeedData();
-
-  const totalSpd  = speedData[speedData.length-1]?.speed||0;
+  const speed                 = useSelector(selectTotalSpeed);
+  const speedHistory          = useSpeedHistory();
 
   return (
     <div style={{display:"flex",flexDirection:"column",height:"100%"}}>
@@ -40,13 +40,13 @@ export default function DownloadList() {
       <div style={{margin:"16px 20px 0",background:"var(--bg-panel)",border:"1px solid var(--border)",borderRadius:8,padding:"12px 16px"}}>
         <div style={{display:"flex",justifyContent:"space-between",marginBottom:8}}>
           <span style={{fontSize:9,color:"var(--text-dim)",letterSpacing:1}}>LIVE SPEED</span>
-          <span style={{fontSize:10,color:"var(--green)"}}>↓ {totalSpd.toFixed(1)} MB/s</span>
+          <span style={{fontSize:10,color:"var(--green)"}}>↓ {formatSpeed(speed)}</span>
         </div>
-        <SpeedGraph data={speedData}/>
+        <SpeedGraph data={speedHistory}/>
       </div>
 
       <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:10,margin:"12px 20px 0"}}>
-        <StatCard label="ACTIVE"     value={counts.active}   color="var(--green)"/>
+        <StatCard label="RUNNING"    value={counts.downloading} color="var(--green)"/>
         <StatCard label="QUEUED"     value={counts.queued}   color="var(--amber)"/>
         <StatCard label="COMPLETED"  value={counts.complete} color="var(--blue)"/>
         <StatCard label="TOTAL"      value={counts.total}    color="var(--purple)"/>

@@ -1,4 +1,4 @@
-import reducer, { eventReceived, received, removed, selectCounts, selectTab, upserted } from "./downloadsSlice";
+import reducer, { eventReceived, received, removed, selectCounts, selectTab, selectTotalSpeed, upserted } from "./downloadsSlice";
 import { State, fromDaemon } from "../model/downloads";
 import { daemonDownload, daemonList } from "../testing/fixtures";
 
@@ -71,9 +71,21 @@ describe("downloads slice", () => {
 
   test("selectors count and filter by tab", () => {
     const state = wrap(loaded());
-    expect(selectCounts(state)).toEqual({ total: 5, active: 2, queued: 1, complete: 1, failed: 1 });
+    expect(selectCounts(state)).toEqual({ total: 5, downloading: 1, active: 2, queued: 1, complete: 1, failed: 1 });
     expect(selectTab(state, "active").map((d) => d.id)).toEqual([2, 1]);
     expect(selectTab(state, "failed").map((d) => d.error)).toEqual(["connection reset by peer"]);
     expect(selectTab(state, "nonsense")).toEqual([]);
+  });
+
+  test("selectTotalSpeed adds up the running downloads only, whatever speed a stale entry still carries", () => {
+    const downloads = [
+      fromDaemon(daemonDownload({ id: 1, status: 1, speedBps: 100 })),
+      fromDaemon(daemonDownload({ id: 2, status: 1, speedBps: 250 })),
+      { ...fromDaemon(daemonDownload({ id: 3, status: 2 })), speedBps: 999 }, // paused, though it still says 999
+      { ...fromDaemon(daemonDownload({ id: 4, status: 3 })), speedBps: 999 }, // finished
+    ];
+    const state = wrap(reducer(initial(), received(downloads)));
+    expect(selectTotalSpeed(state)).toBe(350);
+    expect(selectTotalSpeed(wrap(initial()))).toBe(0);
   });
 });

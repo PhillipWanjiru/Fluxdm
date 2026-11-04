@@ -2,7 +2,7 @@
 import React from "react";
 import { State } from "../../model/downloads";
 const MAP = {
-  [State.DOWNLOADING]: {label:"ACTIVE",color:"#4af48a",bg:"#0a1f12"},
+  [State.DOWNLOADING]: {label:"RUNNING",color:"#4af48a",bg:"#0a1f12"},
   [State.COMPLETE]:    {label:"DONE",  color:"#4ab3f4",bg:"#0a1220"},
   [State.QUEUED]:      {label:"QUEUE", color:"#f4c44a",bg:"#1f1a0a"},
   [State.PAUSED]:      {label:"PAUSED",color:"#888",   bg:"#1a1a1a"},

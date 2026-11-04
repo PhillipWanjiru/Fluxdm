@@ -68,7 +68,7 @@ describe("the downloads list", () => {
     const running = await screen.findByTestId("download-1");
     expect(within(running).getByText("100 B/s")).toBeInTheDocument();
     expect(within(running).getByText(/8s left/)).toBeInTheDocument();
-    expect(within(running).getByText("ACTIVE")).toBeInTheDocument();
+    expect(within(running).getByText("RUNNING")).toBeInTheDocument();
 
     const paused = screen.getByTestId("download-2");
     expect(within(paused).getByText("PAUSED")).toBeInTheDocument();
@@ -81,5 +81,20 @@ describe("the downloads list", () => {
     await user.click(await screen.findByText("a.iso"));
     expect(screen.getByText("/d/a.iso")).toBeInTheDocument();
     expect(screen.getByText("example.com")).toBeInTheDocument();
+  });
+
+  test("the cards count what is running, queued, done and all, and the speed is that of the running downloads", async () => {
+    renderList();
+    await screen.findByText("a.iso");
+
+    const card = (label) => screen.getByRole("group", { name: label });
+    expect(card("RUNNING")).toHaveTextContent("1");
+    expect(card("QUEUED")).toHaveTextContent("1");
+    expect(card("COMPLETED")).toHaveTextContent("1");
+    expect(card("TOTAL")).toHaveTextContent("5");
+
+    // download 1 runs at 100 B/s; the paused one (which the active tab also shows) does not count
+    expect(screen.getByText("↓ 100 B/s")).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: "Combined download speed over the last minute" })).toBeInTheDocument();
   });
 });

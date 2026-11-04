@@ -9,7 +9,7 @@
  *   eventReceived  one push event from /topic/downloads
  */
 import { createEntityAdapter, createSelector, createSlice } from "@reduxjs/toolkit";
-import { TABS, applyEvent, mergeSnapshot } from "../model/downloads";
+import { State, TABS, applyEvent, mergeSnapshot } from "../model/downloads";
 
 const adapter = createEntityAdapter({ sortComparer: (a, b) => b.id - a.id });
 
@@ -49,14 +49,20 @@ const selectors = adapter.getSelectors((state) => state.downloads);
 export const selectAllDownloads = selectors.selectAll;
 export const selectDownloadById = selectors.selectById;
 
-/* How many downloads each tab shows, and the total. */
+/* How many downloads each tab shows, how many are actually running (the active tab also holds the paused ones),
+ * and the total. */
 export const selectCounts = createSelector(selectAllDownloads, (downloads) => {
-  const counts = { total: downloads.length };
+  const counts = { total: downloads.length, downloading: downloads.filter((d) => d.state === State.DOWNLOADING).length };
   for (const [tab, states] of Object.entries(TABS)) {
     counts[tab] = downloads.filter((d) => states.includes(d.state)).length;
   }
   return counts;
 });
+
+/* The speed of all running downloads together, in bytes per second. */
+export const selectTotalSpeed = createSelector(selectAllDownloads, (downloads) =>
+  downloads.reduce((sum, d) => (d.state === State.DOWNLOADING ? sum + d.speedBps : sum), 0)
+);
 
 /* The downloads one tab shows. */
 export const selectTab = createSelector(
