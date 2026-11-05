@@ -1,16 +1,14 @@
-/* FluxDM — Settings/NetworkSettings.jsx */
+/* FluxDM — Settings/NetworkSettings.jsx
+ * The limit on all downloads together (the daemon's, GlobalLimit.jsx) and how many segments a new download gets. */
 import React from "react";
 import { useSettings } from "../../hooks/useSettings";
 import { SEGMENT_CHOICES } from "../../model/destination";
+import GlobalLimit from "./GlobalLimit";
 export default function NetworkSettings() {
   const { settings, update } = useSettings();
   return (
     <div style={{display:"flex",flexDirection:"column",gap:16,maxWidth:400}}>
-      <div>
-        <label style={{fontSize:10,color:"var(--text-dim)",letterSpacing:1,display:"block",marginBottom:6}}>GLOBAL BANDWIDTH LIMIT (KB/s, 0=unlimited)</label>
-        <input type="number" value={settings.globalLimit} onChange={e=>update({globalLimit:+e.target.value})}
-          style={{width:"100%",background:"var(--bg-panel)",border:"1px solid var(--border)",borderRadius:6,padding:"9px 12px",color:"#fff",fontFamily:"monospace",fontSize:12,outline:"none"}}/>
-      </div>
+      <GlobalLimit />
       <div>
         <span style={{fontSize:10,color:"var(--text-dim)",letterSpacing:1,display:"block",marginBottom:6}}>DEFAULT SEGMENTS</span>
         <div role="group" aria-label="Default segments" style={{display:"flex",gap:4}}>

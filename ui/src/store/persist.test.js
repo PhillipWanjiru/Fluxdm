@@ -20,7 +20,7 @@ describe("loadSettings", () => {
   });
 
   test("drops values that are not usable and keeps the rest", () => {
-    window.localStorage.setItem(KEY, JSON.stringify({ downloadDir: "relative/dir", defaultSegments: 500, theme: "pink", globalLimit: 99, extra: 1 }));
+    window.localStorage.setItem(KEY, JSON.stringify({ downloadDir: "relative/dir", defaultSegments: 500, theme: "pink", extra: 1 }));
     expect(loadSettings()).toEqual({});
     window.localStorage.setItem(KEY, JSON.stringify({ downloadDir: "~/Videos", defaultSegments: 2.5 }));
     expect(loadSettings()).toEqual({ downloadDir: "~/Videos" });
@@ -50,7 +50,7 @@ describe("persistSettings", () => {
 
   test("saves a changed setting, and only the ones the UI owns", () => {
     const store = fresh();
-    store.dispatch(update({ defaultSegments: 16, globalLimit: 12345 }));
+    store.dispatch(update({ defaultSegments: 16, scratch: 12345 }));
     expect(JSON.parse(window.localStorage.getItem(KEY))).toEqual({ downloadDir: "~/Downloads", defaultSegments: 16, theme: "dark" });
   });
 
@@ -58,7 +58,7 @@ describe("persistSettings", () => {
     const store = fresh();
     const setItem = jest.spyOn(Storage.prototype, "setItem");
     store.dispatch({ type: "downloads/eventReceived", payload: { type: "progress", id: 1 } });
-    store.dispatch(update({ globalLimit: 5 })); // not stored
+    store.dispatch(update({ scratch: 5 })); // not stored
     expect(setItem).not.toHaveBeenCalled();
     store.dispatch(update({ downloadDir: "/data" }));
     expect(setItem).toHaveBeenCalledTimes(1);

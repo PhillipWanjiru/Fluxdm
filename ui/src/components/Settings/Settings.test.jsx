@@ -6,7 +6,14 @@ import { makeStore } from "../../store";
 import { initialSettings } from "../../store/settingsSlice";
 import { loadSettings, persistSettings } from "../../store/persist";
 import SettingsView from "./SettingsView";
+import { getBandwidthLimit } from "../../api/stats";
 
+jest.mock("../../api/stats"); /* the limit on all downloads together is the daemon's; GlobalLimit.test.jsx covers it */
+
+beforeEach(() => {
+  getBandwidthLimit.mockReset();
+  getBandwidthLimit.mockResolvedValue(0);
+});
 afterEach(() => window.localStorage.clear());
 
 function setup() {

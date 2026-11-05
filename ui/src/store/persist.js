@@ -3,7 +3,8 @@
  * directory). Anything that can go wrong with storage (disabled, full, a private window, damaged text) means
  * "use the defaults", never an error: the UI must start.
  *
- * Only what the UI owns is stored. The daemon-wide speed limit belongs to the daemon and is read from it. */
+ * Only what the UI owns is stored. The limit on all downloads together belongs to the daemon and is read from it
+ * (store/bandwidthSlice.js). */
 import { MAX_SEGMENTS, hasControlChars, isAbsoluteDirectory } from "../model/destination";
 
 const KEY = "fluxdm.settings.v1";

@@ -1,9 +1,10 @@
 /* FluxDM — settingsSlice.js
- * What the user can change. downloadDir, defaultSegments and theme are kept between runs (store/persist.js). */
+ * What the user can change here, all of it kept between runs (store/persist.js). The limit on all downloads together
+ * is not among it: the daemon owns that (store/bandwidthSlice.js). */
 import { createSlice } from "@reduxjs/toolkit";
 import { DEFAULT_DIRECTORY } from "../model/destination";
 
-export const initialSettings = { globalLimit:0, downloadDir:DEFAULT_DIRECTORY, defaultSegments:8, theme:"dark" };
+export const initialSettings = { downloadDir:DEFAULT_DIRECTORY, defaultSegments:8, theme:"dark" };
 
 const slice = createSlice({ name:"settings",
   initialState:initialSettings,
