@@ -18,9 +18,10 @@ function checked(data) {
   return data;
 }
 
-/* What a page offers: { site, title, thumbnail, duration, formats: [{ id, ext, height, abr }] }. */
-export async function detect(url) {
-  const { data } = await client.post("/grabber/detect", null, { params: { url }, timeout: DETECT_TIMEOUT_MS });
+/* What a page offers: { site, title, thumbnail, duration, formats: [{ id, ext, height, abr }] }. `signal`
+ * (AbortController) lets the page stop waiting. */
+export async function detect(url, { signal } = {}) {
+  const { data } = await client.post("/grabber/detect", null, { params: { url }, timeout: DETECT_TIMEOUT_MS, signal });
   const meta = checked(data);
   return { ...meta, formats: Array.isArray(meta.formats) ? meta.formats.map((f) => ({ ...f, id: String(f.id) })) : [] };
 }

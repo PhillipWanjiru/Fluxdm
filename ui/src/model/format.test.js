@@ -1,4 +1,4 @@
-import { formatBytes, formatEta, formatSpeed } from "./format";
+import { formatBytes, formatDuration, formatEta, formatSpeed } from "./format";
 
 describe("formatBytes", () => {
   test.each([
@@ -46,5 +46,24 @@ describe("formatEta", () => {
 
   test("unknown is a dash", () => {
     for (const v of [null, undefined, -1, NaN, "soon"]) expect(formatEta(v)).toBe("—");
+  });
+});
+
+describe("formatDuration", () => {
+  test.each([
+    [0, "0:00"],
+    [9, "0:09"],
+    [185, "3:05"],
+    [3599, "59:59"],
+    [3600, "1:00:00"],
+    [7620, "2:07:00"],
+    [36000, "10:00:00"],
+    [61.4, "1:01"],
+  ])("%d seconds is %s", (seconds, text) => {
+    expect(formatDuration(seconds)).toBe(text);
+  });
+
+  test("unknown is a dash", () => {
+    for (const v of [null, undefined, -1, NaN, "long"]) expect(formatDuration(v)).toBe("—");
   });
 });

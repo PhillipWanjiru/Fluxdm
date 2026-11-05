@@ -14,6 +14,13 @@ describe("api/grabber", () => {
     expect(meta).toMatchObject({ title: "A clip", formats: [{ id: "18", ext: "mp4", height: 360 }] });
   });
 
+  test("detect can be abandoned", async () => {
+    const daemon = installFakeDaemon(client, { "POST /grabber/detect": () => ({ data: { formats: [] } }) });
+    const controller = new AbortController();
+    await detect(PAGE, { signal: controller.signal });
+    expect(daemon.calls[0].signal).toBe(controller.signal);
+  });
+
   test("detect allows for a slow page", async () => {
     const daemon = installFakeDaemon(client, { "POST /grabber/detect": () => ({ data: { formats: [] } }) });
     await detect(PAGE);

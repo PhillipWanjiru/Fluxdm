@@ -7,6 +7,7 @@ import {
   normalizePath,
   utf8Length,
   validateDownload,
+  validateUrl,
 } from "./destination";
 
 const ok = { url: "https://example.com/a.iso", directory: "~/Downloads", fileName: "a.iso" };
@@ -75,6 +76,20 @@ describe("cleanFileName and joinPath", () => {
   test("isAbsoluteDirectory", () => {
     for (const dir of ["/", "/srv", "~", "~/", "~/Downloads", "  /srv  "]) expect(isAbsoluteDirectory(dir)).toBe(true);
     for (const dir of ["", "srv", "./srv", "../srv", "~srv", "~user/x"]) expect(isAbsoluteDirectory(dir)).toBe(false);
+  });
+});
+
+describe("validateUrl", () => {
+  test("accepts an http or https address, whatever it carries", () => {
+    for (const url of ["https://example.com", "http://127.0.0.1:7171/a", "https://www.youtube.com/watch?v=abc&t=30s#x"]) {
+      expect(validateUrl(url)).toBeNull();
+    }
+  });
+
+  test("refuses the rest, with the field to mark", () => {
+    expect(validateUrl("file:///etc/passwd")).toMatchObject({ field: "url", message: expect.stringContaining("http:// or https://") });
+    expect(validateUrl("https://example.com/a\u0000b")).toMatchObject({ field: "url" });
+    expect(validateUrl(`https://example.com/${"a".repeat(4100)}`)).toMatchObject({ message: expect.stringContaining("too long") });
   });
 });
 

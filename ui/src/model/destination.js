@@ -83,16 +83,24 @@ export function joinPath(directory, fileName) {
   return `${dir.replace(/\/+$/, "")}/${fileName}`;
 }
 
-/* The first thing wrong with a new download, as { field, message }, or null when the daemon should accept it. */
-export function validateDownload({ url, directory, fileName }) {
-  const address = url.trim();
-  if (!address) return { field: "url", message: "Enter the address to download." };
+/* What is wrong with an address that is not empty, as { field: "url", message }, or null: the shape and the length
+ * the daemon accepts (DownloadService.validated). */
+export function validateUrl(address) {
   if (hasControlChars(address) || !URL_SHAPE.test(address)) {
     return { field: "url", message: "The address must start with http:// or https:// and contain no spaces." };
   }
   if (utf8Length(address) > MAX_URL_BYTES) {
     return { field: "url", message: `The address is too long (at most ${MAX_URL_BYTES} bytes).` };
   }
+  return null;
+}
+
+/* The first thing wrong with a new download, as { field, message }, or null when the daemon should accept it. */
+export function validateDownload({ url, directory, fileName }) {
+  const address = url.trim();
+  if (!address) return { field: "url", message: "Enter the address to download." };
+  const wrong = validateUrl(address);
+  if (wrong) return wrong;
 
   const dir = directory.trim();
   if (!dir) return { field: "directory", message: "Choose a folder to save to." };
