@@ -101,7 +101,7 @@ export default function DownloadItem({ dl }) {
       )}
 
       {expanded&&(
-        <div id={detailsId} style={{marginTop:14,paddingTop:14,borderTop:"1px solid var(--border)",display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:12}}>
+        <div id={detailsId} role="group" aria-label={`Details of ${dl.name}`} style={{marginTop:14,paddingTop:14,borderTop:"1px solid var(--border)",display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:12}}>
           {[["SEGMENTS",dl.segments+"×"],["SOURCE",hostOf(dl.url)],["DOWNLOADED",formatBytes(dl.downloaded)],["ID",dl.id]].map(([k,v])=>(
             <div key={k}><div style={{fontSize:9,color:"var(--text-dim)",marginBottom:3}}>{k}</div><div style={{fontSize:11,color:"#888"}}>{v}</div></div>
           ))}

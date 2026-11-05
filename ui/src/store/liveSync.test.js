@@ -53,7 +53,10 @@ function setup({ list = [dl({ id: 1 })], timing } = {}) {
     },
   };
   t.stop = startLiveSync(store, {
-    open: (h) => ((handlers = h), feed),
+    open: (h) => {
+      handlers = h;
+      return feed;
+    },
     fetchList: t.fetchList,
     fetchHealth: t.fetchHealth,
     timing,

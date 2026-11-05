@@ -188,13 +188,14 @@ describe("the card", () => {
 
     await user.click(toggle);
     expect(toggle).toHaveAttribute("aria-expanded", "true");
-    const details = document.getElementById(toggle.getAttribute("aria-controls"));
+    const details = screen.getByRole("group", { name: "Details of a.iso" });
+    expect(toggle).toHaveAttribute("aria-controls", details.id); /* the name says which part it opens */
     expect(details).toHaveTextContent("/d/a.iso");
     expect(details).toHaveTextContent("example.com");
 
     await user.click(toggle);
     expect(toggle).toHaveAttribute("aria-expanded", "false");
-    expect(document.getElementById(toggle.getAttribute("aria-controls"))).toBeNull();
+    expect(screen.queryByRole("group", { name: "Details of a.iso" })).not.toBeInTheDocument();
   });
 
   test("clicking an action does not open it", async () => {

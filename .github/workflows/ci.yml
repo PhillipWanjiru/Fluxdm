@@ -156,6 +156,11 @@ jobs:
       - name: Install dependencies (the exact versions in package-lock.json)
         run: npm ci --no-audit --no-fund --prefix ui
 
+      # The sources and the tests, with no warnings allowed: the production build below only looks at what the
+      # app imports, so without this the tests would go unchecked.
+      - name: Lint
+        run: npm run lint --prefix ui
+
       # Actions sets CI=true: Jest runs once instead of watching.
       - name: Unit and component tests
         run: npm test --prefix ui -- --watchAll=false

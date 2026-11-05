@@ -17,8 +17,8 @@ function setup() {
     </Provider>
   );
   const dispatch = (action) => act(() => void store.dispatch(action));
-  const wait = (ms) => act(() => void jest.advanceTimersByTime(ms));
-  return { store, dispatch, wait };
+  const advance = (ms) => act(() => void jest.advanceTimersByTime(ms));
+  return { store, dispatch, advance };
 }
 
 const region = () => screen.getByRole("status");
@@ -31,25 +31,25 @@ describe("the connection banner", () => {
   });
 
   test("waits a second before it appears, so a start-up does not flash it", () => {
-    const { wait } = setup(); // connecting, as at every start
-    wait(999);
+    const { advance } = setup(); // connecting, as at every start
+    advance(999);
     expect(region()).toBeEmptyDOMElement();
-    wait(1);
+    advance(1);
     expect(region()).toHaveTextContent("Not connected to the FluxDM daemon.");
     expect(screen.getByText(/Not connected/)).toHaveAttribute("data-kind", "warning");
   });
 
   test("never appears when the connection is there within that second", () => {
-    const { dispatch, wait } = setup();
-    wait(500);
+    const { dispatch, advance } = setup();
+    advance(500);
     dispatch(linkChanged(Link.LIVE));
-    wait(5000);
+    advance(5000);
     expect(region()).toBeEmptyDOMElement();
   });
 
   test("changes its message at once while it is showing, and goes when all is well", () => {
-    const { dispatch, wait } = setup();
-    wait(1000);
+    const { dispatch, advance } = setup();
+    advance(1000);
     expect(region()).toHaveTextContent("Not connected");
 
     dispatch(linkChanged(Link.UNAUTHORIZED));
@@ -61,18 +61,18 @@ describe("the connection banner", () => {
   });
 
   test("tells when the core is down, and when the list could not be loaded", () => {
-    const { dispatch, wait } = setup();
+    const { dispatch, advance } = setup();
     dispatch(linkChanged(Link.LIVE));
 
     dispatch(coreChanged({ up: false, reason: "ipc closed" }));
-    wait(1000);
+    advance(1000);
     expect(region()).toHaveTextContent("The download core is not available (ipc closed).");
 
     dispatch(coreChanged({ up: true }));
     expect(region()).toBeEmptyDOMElement();
 
     dispatch(listFailed("The daemon is not ready."));
-    wait(1000);
+    advance(1000);
     expect(region()).toHaveTextContent("Could not load the list of downloads (The daemon is not ready).");
   });
 });

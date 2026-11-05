@@ -1,5 +1,5 @@
 import React from "react";
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { Provider } from "react-redux";
 import { makeStore } from "../../store";
@@ -61,7 +61,7 @@ describe("network settings", () => {
   test("the default segment count is chosen from the same list the dialog offers, and kept", async () => {
     const { store, user } = setup();
     const group = screen.getByRole("group", { name: "Default segments" });
-    expect(group.querySelectorAll("button")).toHaveLength(4);
+    expect(within(group).getAllByRole("button")).toHaveLength(4);
     expect(screen.getByRole("button", { name: "8×" })).toHaveAttribute("aria-pressed", "true");
 
     await user.click(screen.getByRole("button", { name: "16×" }));
