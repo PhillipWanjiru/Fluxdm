@@ -14,6 +14,7 @@
 - [ ] `bash tests/run_daemon_tests.sh`
 - [ ] `bash tests/smoke_api.sh` for changes to how the API handles requests (needs the jar and the core built)
 - [ ] `bash tests/run_engine_tests.sh`
+- [ ] `bash tests/run_ui_tests.sh` for changes under `ui/` (lint, Jest, the Electron shell's tests, the production build)
 - [ ] Sanitizer run (ASan + UBSan, and TSan if threads are involved) for changes to the core's threading, memory or I/O
 
 ## Risk

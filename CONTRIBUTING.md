@@ -29,6 +29,10 @@ make -C core                      # build the core
 bash tests/run_all.sh --quick     # prove your checkout works
 ```
 
+Working on the UI (`ui/`) also needs Node.js 20 or later (CI uses 22; the `nodejs` package of many Linux
+distributions is older). `cd ui && npm ci` installs what it needs, and
+[Run the desktop UI](README.md#run-the-desktop-ui) says how to start it.
+
 The hooks are small bash scripts in [`.githooks/`](.githooks); they need nothing beyond bash and git, and
 they are tested by [`.github/scripts/test-hooks.sh`](.github/scripts/test-hooks.sh). Bypass them for a
 single commit with `git commit --no-verify`: CI re-checks the commit messages of every push and pull
@@ -116,6 +120,7 @@ A change is not finished until its tests are. See [docs/TESTING.md](docs/TESTING
   bash tests/run_daemon_tests.sh     # Java (add --no-maven if you have no network)
   bash tests/smoke_api.sh            # the built daemon's API defences; needs `make -C core` and `mvn -f daemon/pom.xml -DskipTests package`
   bash tests/run_engine_tests.sh     # C++ engine layer
+  bash tests/run_ui_tests.sh         # the UI: lint, Jest, the Electron shell's tests, the production build (Node.js 20+)
   ```
 
 - **Changes to the core's threading, memory or I/O** also need a sanitizer run (ASan + UBSan, and TSan
@@ -144,6 +149,16 @@ A change is not finished until its tests are. See [docs/TESTING.md](docs/TESTING
   release.
 - If daemon code starts using a new Spring, Jakarta or SLF4J type, add a minimal stand-in under
   `tests/java/stubs/` so the harness still compiles it.
+
+**JavaScript (ui)**
+- ESLint with no warnings allowed (`npm run lint`, over `src/` and `electron/`); CI runs it before the tests.
+- The daemon's wire format (field names, status codes, event shapes) is handled in `src/model/` and
+  `src/api/`. Components get models, never raw JSON, and a failed call reaches them as an `ApiError` whose
+  message can be shown as it is.
+- The Electron shell's rules are plain modules that take Electron as an argument, so `node --test` runs them
+  (`npm run test:electron`). A new rule comes with a test; `python3 tests/mutation_electron.py` breaks the
+  rules one at a time to show whether the tests would notice (about three minutes; not part of CI).
+- Component tests find things the way a user does, by role and name, not by id or selector.
 
 **Python (tests, grabber)**
 - Tests use the standard library only. Target Python 3.10 or newer.

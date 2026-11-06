@@ -20,9 +20,11 @@ lock-free per download, while queueing, persistence, scheduling and the API live
 that talks to the core over a versioned binary protocol on a Unix socket.
 
 > **Status: early but real.** The C core and the daemon work end to end and are heavily tested.
-> The browser extension, the video grabber and the desktop UI are prototypes that are not wired
-> in yet. See [Project status](#project-status) and [docs/ROADMAP.md](docs/ROADMAP.md) for what is
-> done and what is not.
+> The desktop UI drives the daemon (downloads, live progress, schedule, speed limit, video lookup) and
+> is covered by unit, component and browser checks, though not yet by an end-to-end test against the
+> real daemon. The browser extension and the video grabber are prototypes that are not wired in yet.
+> See [Project status](#project-status) and [docs/ROADMAP.md](docs/ROADMAP.md) for what is done and
+> what is not.
 
 ## Highlights
 
@@ -56,7 +58,7 @@ that talks to the core over a versioned binary protocol on a Unix socket.
 ```mermaid
 flowchart LR
     subgraph clients ["Clients"]
-        UI["Desktop UI<br/>(React + Electron, prototype)"]
+        UI["Desktop UI<br/>(React + Electron)"]
         EXT["Browser extension<br/>(MV3, prototype)"]
         CLI["curl / scripts"]
     end
@@ -96,7 +98,7 @@ specified in [docs/IPC_PROTOCOL.md](docs/IPC_PROTOCOL.md).
 | Engine layer | [`engine/`](engine) | C++17 | **Library, not wired in.** Segment tuning, buffers and BitTorrent building blocks; built and unit-tested standalone. |
 | Video grabber | [`grabber/`](grabber) | Python (FastAPI, yt-dlp) | **Prototype.** A thin yt-dlp wrapper with `/detect` and `/grab`; the daemon does not start it and its bridge is not aligned with it yet. |
 | Browser extension | [`extension/`](extension) | JavaScript (Manifest V3) | **Skeleton.** Cancels a browser download and announces it, but nothing receives the announcement yet: the hand-off to the daemon is a stub. Do not load it for everyday browsing. |
-| Desktop UI | [`ui/`](ui) | React, Redux, Electron | **Prototype.** Components and styles exist and the downloads list polls the REST API, but the app shell, the status mapping and the build entry point are unfinished. |
+| Desktop UI | [`ui/`](ui) | React, Redux, Electron | **Working.** Follows the daemon live; add, pause, resume, retry, remove; scheduler; video lookup; global speed limit; daemon health. Tested with Jest and in a browser; not yet run against the real daemon in CI. See [Run the desktop UI](#run-the-desktop-ui). |
 
 ## Getting started
 
@@ -153,8 +155,9 @@ curl -s -H "$AUTH" http://127.0.0.1:7171/api/health                        # dae
 Without the token a request gets `401`. A request that names another host, or comes from a web page
 that is not on the allow-list, gets `403` even with the token ([SECURITY.md](SECURITY.md)).
 
-The UI prototype reads the token itself: the Electron app through its main process, and `npm start` in a
-browser when run as `REACT_APP_FLUXDM_TOKEN="$(cat ~/.fluxdm/api-token)" npm start`.
+The UI reads the token itself: the Electron app through its main process, and `npm start` in a browser
+when run as `REACT_APP_FLUXDM_TOKEN="$(cat ~/.fluxdm/api-token)" npm start`
+([Run the desktop UI](#run-the-desktop-ui)).
 
 | Method and path | Purpose |
 |---|---|
@@ -169,6 +172,36 @@ browser when run as `REACT_APP_FLUXDM_TOKEN="$(cat ~/.fluxdm/api-token)" npm sta
 | `ws://127.0.0.1:7171/ws` (STOMP) | Live progress on `/topic/downloads` and `/topic/downloads/{id}`; send the token in the `CONNECT` frame's `Authorization` header |
 
 Errors come back as `{"error": "..."}` with a fitting status (400, 404, 409, 503).
+
+### Run the desktop UI
+
+The UI needs Node.js 20 or later and a running daemon (see above). It lists your downloads and follows
+them live, adds, pauses, resumes, retries and removes them, schedules a paused or failed download, looks
+up the formats of a video page for the grabber, and sets the daemon's global speed limit.
+
+```bash
+cd ui
+npm ci                   # the exact versions in package-lock.json; also downloads Electron (about 100 MB)
+npm run build            # the page the desktop app shows
+npm run electron         # the desktop app; it reads the token from ~/.fluxdm/api-token itself
+```
+
+To work on it, `npm run electron:dev` starts the React dev server and an Electron window on it, and
+`REACT_APP_FLUXDM_TOKEN="$(cat ~/.fluxdm/api-token)" npm start` serves the same page to an ordinary browser at
+<http://localhost:3000> (a browser cannot read the token file, so it is handed the token).
+
+If Electron stops at start with `The SUID sandbox helper binary was found, but is not configured correctly`
+(Ubuntu 24.04 and later restrict the user namespaces its sandbox would otherwise use), give the helper the owner
+and mode it asks for. Do this once after each `npm ci`, and do not start Electron with `--no-sandbox` instead:
+
+```bash
+sudo chown root:root ui/node_modules/electron/dist/chrome-sandbox
+sudo chmod 4755 ui/node_modules/electron/dist/chrome-sandbox
+```
+
+The page runs in a sandbox under a strict Content-Security-Policy and may talk only to the daemon
+([SECURITY.md](SECURITY.md)). The UI's tests are `npm test`, `npm run lint` and `npm run test:electron`
+([docs/TESTING.md](docs/TESTING.md#the-desktop-ui)).
 
 ### Run the core on its own
 
@@ -226,7 +259,7 @@ daemon/      Spring Boot daemon: REST, STOMP, SQLite, queue, scheduler, core sup
 engine/      C++17 engine layer (segment tuning, buffers, BitTorrent building blocks)
 grabber/     Python video-grabber service (FastAPI + yt-dlp), prototype
 extension/   Browser extension (Manifest V3), prototype
-ui/          React + Electron desktop UI, prototype
+ui/          React + Electron desktop UI
 db/          Reference SQL schema, migrations and seed data
 config/      Example runtime configuration files
 tests/       Unit, integration, behaviour, daemon and engine test suites and their harnesses
@@ -242,10 +275,10 @@ docs/        Architecture, protocol, rate limiting, testing, roadmap
 
 ## Roadmap
 
-Next up, in rough order: a "waiting for server" state in the daemon and UI, wiring the UI to the
-daemon, the browser-extension hand-off, the grabber service, then engine-layer integration
-(dynamic segment rebalancing, TLS session reuse). The full list, including known limitations, is
-in [docs/ROADMAP.md](docs/ROADMAP.md).
+Next up, in rough order: a "waiting for server" state in the daemon and UI, per-segment progress, the
+browser-extension hand-off (including capturing the media a page plays), the grabber service, and a measured
+comparison with curl, wget and aria2 that decides what the engine layer should take on. Before 1.0 the whole
+project gets an audit. The full list, including known limitations, is in [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ## Contributing
 

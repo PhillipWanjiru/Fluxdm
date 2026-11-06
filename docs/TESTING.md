@@ -11,6 +11,7 @@ that touch threads and memory run under sanitizers.
 - [Sanitizer builds](#sanitizer-builds)
 - [How the daemon is tested](#how-the-daemon-is-tested)
 - [The API smoke test](#the-api-smoke-test)
+- [The desktop UI](#the-desktop-ui)
 - [The mock origin server](#the-mock-origin-server)
 - [Test quality](#test-quality)
 - [Continuous integration](#continuous-integration)
@@ -29,6 +30,8 @@ bash tests/run_daemon_tests.sh     # Java suites (add --no-e2e to skip the real-
 bash tests/smoke_api.sh            # the built daemon's API defences over real HTTP and WebSocket (needs the jar and the core built)
 bash tests/run_engine_tests.sh     # C++ engine layer
 
+(cd ui && npm ci && npm run lint && npm test -- --watchAll=false && npm run test:electron && npm run build)   # the desktop UI
+
 python3 tests/test_core.py -k rate_limit      # only the behaviour tests whose function name contains "rate_limit"
 FLUXDM_CORE=/path/to/fluxdm-core python3 tests/test_core.py    # test another build of the core
 ```
@@ -46,6 +49,7 @@ test starts its **own** core on a private socket, so a daemon or core you are ru
 | **Daemon** | `bash tests/run_daemon_tests.sh` | JDK 21 (Maven optional) | The Java services against a scripted fake core, and against the real core. See below. |
 | **API smoke** | `bash tests/smoke_api.sh` | JDK 21, curl, python3, the built jar and core | The real daemon, started in a throw-away home directory, refuses the wrong Host, the wrong Origin and a missing or wrong token over real HTTP and WebSocket. See below. |
 | **Engine** | `bash tests/run_engine_tests.sh` | g++, `libssl-dev` | The C++ engine layer: segment manager, adaptive tuner, buffer manager, bencode and `.torrent` metadata parsing, magnet links, SHA-1, peer discovery. Compiles directly with `g++`; no CMake needed. |
+| **UI** | `npm run lint`, `npm test`, `npm run test:electron`, `npm run build` in `ui/` | Node.js 20+ | The desktop UI's model, store and components with Jest, and the Electron shell's rules with `node --test`. See [The desktop UI](#the-desktop-ui). |
 
 ## What the behaviour suite covers
 
@@ -148,6 +152,53 @@ with 23 deliberately broken variants (a skipped Host check, a wrong-token check 
 token file that is group-readable, a session that forgets it authenticated, ...), and had to fail on the
 matching check for every one of them. The stand-in is not part of the repository.
 
+## The desktop UI
+
+Four commands in `ui/`, all run by the `ui` job in CI. None needs Electron's binary, which CI does not download
+(`ELECTRON_SKIP_BINARY_DOWNLOAD=1`):
+
+| Command | What it checks |
+|---|---|
+| `npm run lint` | ESLint over the sources, the tests and `electron/`, with no warnings allowed |
+| `npm test -- --watchAll=false` | The Jest suites (jsdom, React Testing Library): 459 tests in 38 suites |
+| `npm run test:electron` | The Electron shell's rules with `node --test`: 50 tests against a stand-in for Electron |
+| `npm run build` | The production build, which treats lint warnings as errors (`CI=true`) |
+
+**What the Jest tests stand on.** The pure model (the daemon's JSON and statuses to UI state, validation,
+formatting, the connection decisions); the store, including the live-sync algorithm driven by a scripted STOMP
+feed with duplicated, late and missing events, reconnects and failed snapshots; and the components, queried the
+way a person uses them (roles, labels and text, not markup), with the API modules mocked wherever a component
+calls the daemon. Time is injected, or faked only where a test is about polling.
+
+**What the Electron tests stand on.** `shell.js` takes Electron as an argument, so the tests hand it a stand-in
+that records what it is asked to do and then call the callbacks it registered, as Electron would: the window's
+`webPreferences`, the refusal of navigations, redirects, new windows, webviews and permissions, who is given the
+token, what `app://` requests are answered with. `security.js` and `appProtocol.js` have no Electron in them at
+all: the policy string, which addresses are the app's own, and the spellings of a path (`..`, `%2e%2e`, `%2f`,
+backslash, NUL, bad escapes) that must never reach outside the build directory.
+
+**How those tests were validated.** Passing tests only matter if they can fail, so each rule of the shell is broken
+on purpose, one at a time, in a copy of `ui/electron`, and the tests have to notice: the policy's directives, who
+counts as the app's own page, which paths are refused, the window's switches, who is given the token, what the
+preload exposes. [`tests/mutation_electron.py`](../tests/mutation_electron.py) does it: 72 changes, about three
+minutes. It is not part of CI, because every entry quotes the source it changes, so after a refactor it says which
+entries no longer apply. 71 are caught. The 72nd is a second check on the resolved path that no input can reach,
+because the first already refuses every spelling; it stays as defence in depth. When the script reports a
+survivor, that rule has no test: write one. The first run reported four, and those tests are in the suite.
+
+**What is not covered, and how it was checked instead.**
+
+- *The real daemon.* The UI is tested against the API as documented in the README and exercised by
+  `tests/smoke_api.sh`, not against a running daemon. An end-to-end job that starts the daemon the `daemon` job
+  already builds and drives the built page in a browser is on the roadmap's audit list.
+- *Electron itself.* The stand-in proves the wiring, not Electron's behaviour. During development the production
+  build was served with exactly the headers the shell sends and driven in real Chromium against a stand-in daemon
+  that enforces the same Host, Origin and token rules: the page, its styles, the live feed, pause and resume, the
+  global limit and a video lookup work under the policy, and fourteen things it must refuse (inline script, a
+  script, fetch, WebSocket, image, frame and font from elsewhere, an inline style, a `<style>` element, `<base>`,
+  a form post, a plug-in, `eval`) are refused. That check is not in the repository. After upgrading Electron, run
+  `npm run electron` once with the daemon up and look at the console.
+
 ## The mock origin server
 
 [`tests/fluxtest.py`](../tests/fluxtest.py) provides the scriptable HTTP(S) origin (`Site`), a process
@@ -179,8 +230,8 @@ probe connection, leaking a slot on release, comparing host names case-sensitive
 one at a time into a copy of the source, and the relevant suites had to fail for every one. A mutant
 that survived was either a missing test (which was then written) or an equivalent change that cannot
 alter behaviour (which was recorded as such). The daemon's queue, reconcile and validation logic got the
-same treatment. The mutation script was a one-off development tool and is not part of the repository; the
-tests it drove are.
+same treatment. The mutation script for them was a one-off development tool and is not part of the repository;
+the tests it drove are. (The one for the Electron shell is kept; see [The desktop UI](#the-desktop-ui).)
 
 Other practices that keep the suites honest:
 
@@ -204,6 +255,7 @@ Ubuntu runner:
 | **core-sanitizers** | The core built with ASan + UBSan, then with ThreadSanitizer, each driven by the integration suite; `UBSAN_OPTIONS` and `TSAN_OPTIONS` are set to `halt_on_error=1`, so a report ends the run instead of scrolling past |
 | **daemon** | `mvn package` (compiles the daemon against real Spring and runs the build), the Java suites including the end-to-end suite against the real core, and the API smoke test against the jar that was just built |
 | **engine** | The C++ engine build and its tests |
+| **ui** | `npm ci` (no Electron binary), lint, the Jest suites, the Electron shell tests and the production build |
 
 The commands in the workflow are the same ones documented above; run them locally to reproduce a CI
 failure.

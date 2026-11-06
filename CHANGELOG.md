@@ -18,6 +18,17 @@ contain incompatible changes; they are listed under **Changed** or **Removed** a
   in a browser takes it from `REACT_APP_FLUXDM_TOKEN`.
 - `tests/smoke_api.sh`, which starts the built daemon and checks the defences below over real HTTP and
   WebSocket (CI runs it after the Maven build), and the `ApiSecurityTest` suite for the logic behind them.
+- **The desktop UI is connected to the daemon.** The downloads list follows the daemon live (STOMP over SockJS:
+  a snapshot, then events, taken again after any gap) instead of polling, and shows the daemon's own progress,
+  speed and time left. A download can be added (with a destination), paused, resumed, retried and removed, and the
+  daemon's refusals appear in plain words. There are views for the Scheduler (resume a paused or failed download
+  at a time, once or repeating), the Video Grabber (look up a page's formats through the daemon, with cancel) and
+  Settings (the daemon's global speed limit). The sidebar shows the real total speed and the daemon's health, and
+  a banner says when the daemon or its core is gone.
+- `npm run lint` (ESLint, no warnings allowed; CI runs it) and `npm run test:electron` (the Electron shell's rules
+  against a stand-in for Electron). 459 Jest tests and 50 shell tests; the CI `ui` job runs both, with the
+  production build. `tests/mutation_electron.py` breaks the shell's rules one at a time and checks that a test
+  notices (72 changes; not part of CI).
 
 ### Changed
 
@@ -32,6 +43,13 @@ contain incompatible changes; they are listed under **Changed** or **Removed** a
   set, is used as given; `fluxdm-core --sock` defaults the same way. The core and the daemon must agree, so
   upgrade them together, and stop a core that is still running from an older daemon (`pkill -x fluxdm-core`):
   the new daemon does not look under `/tmp`.
+- **BREAKING:** the packaged desktop app serves its page as `app://-/` from the Electron main process instead of
+  opening `build/index.html` from `file://`, whose requests carry `Origin: null` and are refused by the daemon.
+  Run `npm run build` in `ui/` before `npm run electron`; without a build the app now says so.
+- **BREAKING:** the preload script exposes `window.fluxdm.apiToken()` only. The generic `send` and `receive`
+  channels are gone; nothing used them.
+- `npm run electron:dev` sets `NODE_ENV=development` for Electron. It used to load the production build while it
+  waited for the dev server; now it shows the dev server, and ends it when the window closes.
 
 ### Security
 
@@ -46,6 +64,10 @@ contain incompatible changes; they are listed under **Changed** or **Removed** a
   a link, a file or somebody else's. Another local user can no longer plant a socket for the daemon to adopt.
 - **`~/.fluxdm` is mode `0700`.** It is created that way, and an existing one that was open is closed at start.
   The database in it lists every URL and destination path.
+- **The desktop app's page is confined.** It runs sandboxed without Node, under a Content-Security-Policy that lets
+  it load code only from the app and talk only to the daemon (`127.0.0.1:7171`, HTTP and WebSocket); it cannot
+  navigate away, open windows or be granted a permission; and only its own top-level page can ask the main process
+  for the API token. See [SECURITY.md](SECURITY.md).
 
 ## [0.1.0] - 2026-10-28
 

@@ -6,16 +6,17 @@ so they can be checked against the source (`core/include/*.h`, `core/src/*.c`).
 - [1. System context](#1-system-context)
 - [2. The C core](#2-the-c-core)
 - [3. The Java daemon](#3-the-java-daemon)
-- [4. Failure handling](#4-failure-handling)
-- [5. Design decisions](#5-design-decisions)
-- [6. Security model](#6-security-model)
+- [4. The desktop UI](#4-the-desktop-ui)
+- [5. Failure handling](#5-failure-handling)
+- [6. Design decisions](#6-design-decisions)
+- [7. Security model](#7-security-model)
 
 ## 1. System context
 
 ```mermaid
 flowchart LR
     subgraph clients ["Clients"]
-        UI["Desktop UI<br/>(React + Electron, prototype)"]
+        UI["Desktop UI<br/>(React + Electron)"]
         EXT["Browser extension<br/>(MV3, prototype)"]
         CLI["curl / scripts"]
     end
@@ -62,7 +63,8 @@ flowchart LR
 | **Daemon** (`daemon/`) | The REST / STOMP API, the database, the concurrency queue, scheduled resumes, supervising the core, recovery after restarts | The transfer itself |
 | **IPC protocol** (`ipc/`) | The contract between the two (see [IPC_PROTOCOL.md](IPC_PROTOCOL.md)) | |
 | **Engine layer** (`engine/`) | C++17 building blocks: adaptive tuner, buffer manager, segment manager, bencode / metadata parser, peer discovery | Not linked into the core yet; built and unit-tested standalone |
-| **Grabber, extension, UI** | Prototypes of the video-grabber service, the browser hand-off and the desktop UI | Not wired in yet |
+| **Desktop UI** (`ui/`) | Showing the daemon's state and sending it commands: downloads, schedule, video lookup, the global limit; the Electron shell that hosts it (see [section 4](#4-the-desktop-ui)) | Any download logic: it is a client of the daemon's API |
+| **Grabber, extension** | Prototypes of the video-grabber service and the browser hand-off | Not wired in yet |
 
 The split is deliberate. The transfer path is where latency, memory and system-call overhead matter, so
 it is C with no runtime between it and the kernel. Everything that benefits from a mature ecosystem
@@ -360,7 +362,80 @@ the last crash. On shutdown only a core the daemon spawned is stopped (`SHUTDOWN
 then `SIGKILL` as a last resort); an adopted core is left running. The socket file is never deleted
 by the daemon: the core refuses a socket that a live process serves and replaces a stale one itself.
 
-## 4. Failure handling
+## 4. The desktop UI
+
+The UI (`ui/`) is a React 18 single-page app in an Electron shell. It keeps no download logic of its own: the
+daemon is the source of truth, the UI shows what the daemon reports and sends it commands, and what a command
+did comes back as an event or as an error the UI puts in words.
+
+```mermaid
+flowchart LR
+    subgraph Shell["Electron main process"]
+        APP["app://-/ <br/> serves ui/build, with the CSP"]
+        TOK["apiToken()<br/>reads ~/.fluxdm/api-token"]
+    end
+    subgraph Page["Page (sandboxed renderer)"]
+        UI["React UI"]
+    end
+    D["Daemon<br/>127.0.0.1:7171"]
+    APP -- "index.html, script, styles" --> UI
+    UI -- "the only IPC" --> TOK
+    UI -- "REST + STOMP over SockJS<br/>Origin: app://-, Bearer token" --> D
+```
+
+### 4.1 Layers
+
+| Folder | Holds |
+|---|---|
+| `src/api/` | One module per daemon resource (`downloads`, `scheduler`, `grabber`, `stats` for health, `live` for the STOMP feed). `client.js` adds the token (read once, and again after a `401`); `errors.js` turns every failure into an `ApiError` with a `kind` and a message that is fit to show. |
+| `src/model/` | Pure functions, tested without React: the daemon's JSON and statuses (0 to 4) to the states the UI shows, validation of a destination, a URL and a schedule, formatting, the decision tree behind the connection banner and the sidebar indicator. |
+| `src/store/` | Redux Toolkit slices (downloads, settings, bandwidth, connection) and `liveSync.js`. |
+| `src/hooks/` | `useLiveSync`, `useBandwidthSync`, `useSettings`, `useSpeedHistory`. |
+| `src/components/` | The four views (Downloads, Video Grabber, Scheduler, Settings), the sidebar and the dialogs. |
+| `electron/` | The desktop shell (4.4). |
+
+### 4.2 Staying in step with the daemon
+
+`store/liveSync.js` joins a snapshot (`GET /api/downloads`) with the push feed (`/topic/downloads`, `/topic/core`)
+without a gap and without going back in time: the feed connects and subscribes first, the snapshot is fetched
+while arriving events wait in a buffer, the snapshot goes into the store, and then the buffered events are
+applied in order. Every event is absolute (a state, a byte count, never "plus n"), so an event the snapshot
+already includes does no harm. A snapshot is taken again after every reconnect, when the daemon reports that its
+core is back, once a minute as a safety net, and soon after an event for a download the UI does not have (another
+client added it; the event carries no URL or path). A failed snapshot is retried with a growing delay. What is
+wrong is reported through the connection slice, never thrown, and `model/connection.js` turns it into one
+message for both the banner and the indicator.
+
+### 4.3 Views
+
+Downloads and the Video Grabber stay mounted while another view is shown (hidden, not unmounted), so a lookup
+that is under way and the live speed graph are not lost; Scheduler and Settings mount when shown and read the
+daemon afresh. The two slow calls (looking up a video page and grabbing it) can be given up on, and every failure is shown, not swallowed. The
+bandwidth setting is the daemon's (`GET` / `PUT /api/bandwidth`), shown in KB/s and sent in bytes/s; the grabber
+saves a video in its own download folder and the file does not appear in the downloads list (roadmap item 5).
+
+### 4.4 The Electron shell
+
+`electron/main.js` hands Electron to `shell.js`, which holds the logic and takes Electron as an argument, so that
+it is tested against a stand-in (`npm run test:electron`). The page is treated as untrusted web content:
+
+- **It is served, not opened.** The main process registers `app://` as a standard, secure scheme and answers
+  `app://-/…` from `ui/build` (`appProtocol.js`: GET and HEAD only, and no address that leaves the build
+  directory however it is spelled). A page opened from a file sends `Origin: null`, which the daemon refuses;
+  this one sends `Origin: app://-`, which is on the daemon's allow-list.
+- **It runs under a Content-Security-Policy** (`security.js`) built from the daemon's address: scripts, styles,
+  images and fonts from the app only, connections to `http://127.0.0.1:7171` and `ws://127.0.0.1:7171` only, no
+  frames, forms, plug-ins or `<base>`, no inline code, no `eval`. The daemon's address is written in
+  `src/api/config.js` and in `electron/config.js`; a test fails if they differ, and another compares both with the
+  daemon's `application.properties`.
+- **The window is confined.** Sandboxed, no Node integration, context isolation and web security on, no
+  webviews. It cannot navigate or redirect away from the app, cannot open windows, and is granted no permission.
+  Only one instance runs, and a missing build is a message that says what to run.
+- **The preload exposes one function.** `window.fluxdm.apiToken()` asks the main process for the contents of the
+  token file, and the main process answers only the app's own top-level page (not a frame in it, not another
+  address).
+
+## 5. Failure handling
 
 | Event | What happens |
 |---|---|
@@ -376,7 +451,7 @@ by the daemon: the core refuses a socket that a live process serves and replaces
 | 17th client connects | Refused (`FLUX_IPC_MAX_CLIENTS` = 16). |
 | Checksum mismatch | The download ends in `ERROR` with the checksum wire code. The file is deleted, because a file that failed verification must not sit at its final name looking finished, and its resume state is discarded. |
 
-## 5. Design decisions
+## 6. Design decisions
 
 **Two processes instead of JNI.** A crash, leak or stall in the transfer engine must not take down the
 API, and the reverse. A socket boundary makes each side independently restartable, and the daemon
@@ -415,7 +490,7 @@ fake core and the real binary.
 arrival order, so replies are ordered per connection and no id bookkeeping is needed. The `EVENT` flag
 removes the one ambiguity that remains.
 
-## 6. Security model
+## 7. Security model
 
 - **The API listens on `127.0.0.1` only, and every request proves where it comes from.** It starts
   downloads that write anywhere the daemon's user can write, so `security/ApiGuardFilter` runs in front
@@ -442,6 +517,10 @@ removes the one ambiguity that remains.
   core will not take over a socket that a live process serves, and it never deletes a path that is not
   a socket. `~/.fluxdm` itself, which also holds the database and the token, is mode `0700` too
   (`security/DataDir`).
+- **The desktop app treats its page as untrusted web content** ([section 4.4](#44-the-electron-shell)): it is served
+  by the main process as `app://-/` under a Content-Security-Policy that limits it to its own code and the
+  daemon, runs sandboxed without Node, cannot navigate away, open windows or obtain permissions, and can ask the
+  main process for the API token only as the app's own top-level page.
 - **TLS verification cannot be disabled.** Peer certificate and hostname (or IP) checks are always on.
 - **Untrusted input is validated at every boundary**: URL, path and payload lengths and embedded NULs
   in `CMD_START`; frame magic, version and size; the `.fluxpart` file's structure before any of it is

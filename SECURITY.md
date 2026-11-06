@@ -38,11 +38,11 @@ time to fix the problem before you disclose it.
 - Request validation and path handling in the daemon's REST and STOMP interface.
 - Anything that lets a web page, another local user or another process do something to a user's
   downloads that they did not intend.
+- What the desktop app's page may load, reach and ask of its Electron shell (`ui/electron/`).
 
 **Out of scope**
 
-- The desktop UI, the browser extension and the video grabber, which are prototypes
-  ([ROADMAP](docs/ROADMAP.md)).
+- The browser extension and the video grabber, which are prototypes ([ROADMAP](docs/ROADMAP.md)).
 - Exposing the daemon beyond `127.0.0.1`, which is unsupported (see below).
 - Denial of service by someone who is already allowed to use the API.
 - Attacks that need root or the same user account on the machine.
@@ -87,6 +87,14 @@ time to fix the problem before you disclose it.
   once every 30 seconds per kind, with control characters removed from what the client sent.
 - **The daemon's data directory `~/.fluxdm` is mode `0700`.** The download database in it lists every URL
   and destination path. A directory that an earlier version left open is closed at start.
+- **The desktop app treats its own page as untrusted web content.** The Electron main process serves the packaged
+  page as `app://-/` (a page opened from a file sends `Origin: null`, which the daemon refuses) under a
+  Content-Security-Policy that allows scripts, styles, images and fonts only from the app, connections only to the
+  daemon (`http://127.0.0.1:7171` and `ws://127.0.0.1:7171`), and no frames, forms, plug-ins, `<base>`, inline code
+  or `eval`. The window is sandboxed, has no Node integration and no webviews, cannot navigate or redirect away
+  from the app, cannot open windows and is granted no permission. The page's one power over your computer is
+  `window.fluxdm.apiToken()`, which reads the token file and answers only the app's own top-level page. The rules
+  are in `ui/electron/security.js` and are tested (`npm run test:electron`).
 
 ## Known limitations
 
@@ -107,6 +115,11 @@ must stay on loopback.
 5. **Redirects may cross hosts and schemes**, including from `https` to `http`, as in most download
    tools. They are followed without credentials (see above), but the content that arrives is whatever
    the final server sends: verify checksums for anything important.
+6. **The desktop app runs on Electron 29, which upstream no longer supports**, so the Chromium inside it
+   receives no security fixes. The page loads nothing from the network and is confined as described above,
+   which limits what a flaw could reach, but moving to a supported release is on the audit list
+   ([ROADMAP](docs/ROADMAP.md#before-10-the-audit)). Developer tools stay available in the packaged app, so that
+   a policy violation can be seen.
 
 ## Hardening checklist for users
 
@@ -117,3 +130,5 @@ must stay on loopback.
 - Do not run the daemon or the core as root.
 - If you set `fluxdm.core.socket-path`, keep the socket in a directory only you can enter (limitation 2).
 - Verify checksums for anything important (`checksumType` / `checksum` in the API).
+- Keep the desktop app's sandbox on. If Electron asks for its `chrome-sandbox` helper to be set up, do that
+  ([README](README.md#run-the-desktop-ui)) instead of starting it with `--no-sandbox`.
