@@ -1,22 +1,18 @@
-/* FluxDM — electron/main.js */
-const { app, BrowserWindow, ipcMain } = require("electron");
-const fs = require("fs");
+/* FluxDM — electron/main.js
+ * The entry point of the desktop shell (package.json "main"). It hands Electron to shell.js with the choices the
+ * environment makes; the logic is in shell.js, where it can be tested with a stand-in for Electron.
+ *
+ *   NODE_ENV=development   show the development server (npm run electron:dev) instead of the built page
+ *   FLUXDM_TOKEN_FILE      where the daemon keeps its API token; the daemon's fluxdm.api.token-file, if it is set */
+const electron = require("electron");
 const os = require("os");
 const path = require("path");
+const { startShell } = require("./shell");
 
-/* The daemon's API token (SECURITY.md). Only this process can read the file; the page asks for the text over IPC.
- * FLUXDM_TOKEN_FILE overrides the place, like fluxdm.api.token-file does for the daemon. An empty answer means
- * the daemon has not created the file yet: the page asks again after its next 401. */
-const tokenFile = () => process.env.FLUXDM_TOKEN_FILE || path.join(os.homedir(), ".fluxdm", "api-token");
-ipcMain.handle("fluxdm:api-token", async () => {
-  try { return (await fs.promises.readFile(tokenFile(), "utf8")).trim(); } catch { return ""; }
+startShell({
+  electron,
+  dev: process.env.NODE_ENV === "development",
+  buildDir: path.join(__dirname, "..", "build"),
+  tokenFile: process.env.FLUXDM_TOKEN_FILE || path.join(os.homedir(), ".fluxdm", "api-token"),
+  preload: path.join(__dirname, "preload.js"),
 });
-
-function createWindow() {
-  const win = new BrowserWindow({ width:1200,height:800,backgroundColor:"#0a0a0a",
-    webPreferences:{preload:path.join(__dirname,"preload.js"),contextIsolation:true}});
-  win.loadURL(process.env.NODE_ENV==="development" ? "http://localhost:3000"
-    : `file://${path.join(__dirname,"../build/index.html")}`);
-}
-app.whenReady().then(createWindow);
-app.on("window-all-closed",()=>{ if(process.platform!=="darwin") app.quit(); });

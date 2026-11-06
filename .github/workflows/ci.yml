@@ -165,6 +165,11 @@ jobs:
       - name: Unit and component tests
         run: npm test --prefix ui -- --watchAll=false
 
+      # The Electron shell's rules (what the page may load, reach and ask for), run against a stand-in for Electron:
+      # the binary is not installed here.
+      - name: Electron shell tests
+        run: npm run test:electron --prefix ui
+
       # CI=true also makes the build treat lint warnings as errors.
       - name: Production build
         run: npm run build --prefix ui
