@@ -26,6 +26,7 @@ test("the page is served with its type and the policy", async (t) => {
   assert.equal(answer.headers["content-type"], "text/html; charset=utf-8");
   assert.equal(answer.headers["content-security-policy"], contentSecurityPolicy());
   assert.equal(answer.headers["x-content-type-options"], "nosniff");
+  assert.equal(answer.headers["cache-control"], "no-store"); /* a new build is never answered from an old copy */
 });
 
 test("a script is served from its folder as a script", async (t) => {

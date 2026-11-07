@@ -44,3 +44,9 @@ test("asking for the token is one call on the token channel with nothing in it",
   assert.equal(await exposed[0].api.apiToken(), "the-token");
   assert.deepEqual(invoked, [[TOKEN_CHANNEL]]);
 });
+
+test("what the page passes in is not forwarded: it cannot choose the channel or add to the call", async () => {
+  const { exposed, invoked } = runPreload();
+  await exposed[0].api.apiToken("fluxdm:something-else", { path: "/etc/shadow" });
+  assert.deepEqual(invoked, [[TOKEN_CHANNEL]]);
+});

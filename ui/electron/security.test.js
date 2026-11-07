@@ -117,6 +117,8 @@ test("the spellings that URL parsing does not tidy away are refused outright", (
     "app://-/..%2f..%2fetc/passwd",
     "app://-/static%2f..%2f..%2fetc/passwd",
     "app://-/static%2f..%2findex.html", /* back inside the root, but still a dot-segment in disguise */
+    "app://-/static%2f.%2fjs%2fmain.js", /* a single dot in disguise: harmless in itself, and never a path the build has */
+    "app://-/.%2findex.html",
     "app://-/%5c..%5cetc",
     "app://-/%00",
     "app://-/%E0%A4%A",
