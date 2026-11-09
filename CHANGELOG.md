@@ -11,6 +11,12 @@ contain incompatible changes; they are listed under **Changed** or **Removed** a
 
 ### Added
 
+- **A design for capturing video in the browser** ([docs/VIDEO_CAPTURE.md](docs/VIDEO_CAPTURE.md)): how an
+  extension recognises the media a page plays, how requests are grouped into streams, how HLS and DASH
+  manifests are read, and how many connections to open and in what order, each as a formula with a worked
+  example. Nothing in the product does this yet. `tests/capture_model_check.py` runs 20 checks of the formulas
+  against brute force, exhaustive search and simulation; `tests/mutation_capture.py` breaks 23 of them to show
+  that the checks notice; CI runs both.
 - Settings `fluxdm.api.allowed-hosts`, `fluxdm.api.allowed-origins`, `fluxdm.api.auth.enabled` (a
   development switch that turns off the token check only; `Host` and `Origin` stay enforced) and
   `fluxdm.api.token-file`.

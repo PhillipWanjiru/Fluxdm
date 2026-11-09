@@ -13,6 +13,7 @@ that touch threads and memory run under sanitizers.
 - [The API smoke test](#the-api-smoke-test)
 - [The desktop UI](#the-desktop-ui)
 - [The mock origin server](#the-mock-origin-server)
+- [The video-capture design](#the-video-capture-design)
 - [Test quality](#test-quality)
 - [Continuous integration](#continuous-integration)
 - [Writing tests](#writing-tests)
@@ -32,6 +33,9 @@ bash tests/run_engine_tests.sh     # C++ engine layer
 
 (cd ui && npm ci && npm run lint && npm test -- --watchAll=false && npm run test:electron && npm run build)   # the desktop UI
 
+python3 tests/capture_model_check.py   # the formulas of docs/VIDEO_CAPTURE.md against brute force and simulation (a second)
+python3 tests/mutation_capture.py      # breaks each of them in turn to show that the check notices (about ten seconds)
+
 python3 tests/test_core.py -k rate_limit      # only the behaviour tests whose function name contains "rate_limit"
 FLUXDM_CORE=/path/to/fluxdm-core python3 tests/test_core.py    # test another build of the core
 ```
@@ -50,6 +54,7 @@ test starts its **own** core on a private socket, so a daemon or core you are ru
 | **API smoke** | `bash tests/smoke_api.sh` | JDK 21, curl, python3, the built jar and core | The real daemon, started in a throw-away home directory, refuses the wrong Host, the wrong Origin and a missing or wrong token over real HTTP and WebSocket. See below. |
 | **Engine** | `bash tests/run_engine_tests.sh` | g++, `libssl-dev` | The C++ engine layer: segment manager, adaptive tuner, buffer manager, bencode and `.torrent` metadata parsing, magnet links, SHA-1, peer discovery. Compiles directly with `g++`; no CMake needed. |
 | **UI** | `npm run lint`, `npm test`, `npm run test:electron`, `npm run build` in `ui/` | Node.js 20+ | The desktop UI's model, store and components with Jest, and the Electron shell's rules with `node --test`. See [The desktop UI](#the-desktop-ui). |
+| **Capture design** | `python3 tests/capture_model_check.py` | python3 | The formulas of [VIDEO_CAPTURE.md](VIDEO_CAPTURE.md) (the offer threshold, the classification of parameters, range algebra, the HLS and DASH rules, the connection model, scheduling bounds, expiry, route order) against brute force, exhaustive search or simulation, and the numbers of every worked example. See [The video-capture design](#the-video-capture-design). |
 
 ## What the behaviour suite covers
 
@@ -221,6 +226,33 @@ flagged as events, events are, and no frame is corrupt. A `Site` can:
 
 TLS tests generate a throw-away CA and certificates with the `openssl` command-line tool.
 
+## The video-capture design
+
+[VIDEO_CAPTURE.md](VIDEO_CAPTURE.md) is a design, and most of it is mathematics: a decision threshold, a
+classifier, interval algebra, the rules of two streaming formats, a model of how many connections to open,
+scheduling bounds. A formula in a document can be wrong in ways nobody notices until the code written from
+it is, so [`tests/capture_model_check.py`](../tests/capture_model_check.py) runs each one against something
+that does not share its reasoning:
+
+| Checks | What they pin | Compared with |
+|---|---|---|
+| `C01`–`C02` | The offer threshold; the posterior as prior odds times likelihood ratios | The expected costs, drawn at random; the direct product form |
+| `C03`–`C05` | The variability of a parameter; position parameters; interval union, gaps and the requests to fill them | The √m relation; shuffled tilings with holes and overlaps; a byte-by-byte bitmap |
+| `C06`–`C11` | HLS byte ranges, the default IV, target duration, bandwidth bounds; DASH timelines; the skew between two tracks | Hand-written big-endian bytes; expansion by hand; random segment grids |
+| `C12`–`C16` | The chunk size for a target efficiency; concavity, break-even and the best number of connections; list-scheduling bounds; the assembly rule; the in-order window | A brute-force search over every connection count; exhaustive search over assignments; a simulation of connections |
+| `C17`–`C20` | Refreshes under a lifetime; the order of routes; the estimate of a route's success; coverage by playback | A walk through the transfer; every permutation; Simpson's rule; a bitmap of ticks |
+
+It is standard-library Python and deterministic (each check seeds its generator from its id), and it takes
+about a second. `-k TEXT` selects checks by id or title, and `--list` prints each with the section it pins.
+Every worked example of the document (`E1`–`E9`) is asserted in the check, with the numbers the text gives.
+
+**How it was validated.** [`tests/mutation_capture.py`](../tests/mutation_capture.py) breaks 23 formulas one at
+a time in a private copy of the check (the costs of the threshold swapped, a one-byte hole tolerated, the IV
+in little-endian order, the roles of the two tracks swapped in the skew bound, a scheduler that picks the
+busiest connection, ...) and requires the check that pins each one to fail. All 23 are caught. Unlike the one
+for the Electron shell, this one is part of CI, because it takes about ten seconds. Every entry quotes the
+line it changes, so after a refactor the script says which entries no longer apply.
+
 ## Test quality
 
 Passing tests only matter if they can fail. For the rate-limiting code, the host gate in particular,
@@ -231,7 +263,8 @@ one at a time into a copy of the source, and the relevant suites had to fail for
 that survived was either a missing test (which was then written) or an equivalent change that cannot
 alter behaviour (which was recorded as such). The daemon's queue, reconcile and validation logic got the
 same treatment. The mutation script for them was a one-off development tool and is not part of the repository;
-the tests it drove are. (The one for the Electron shell is kept; see [The desktop UI](#the-desktop-ui).)
+the tests it drove are. (The ones for the Electron shell and for the capture design's formulas are kept; see
+[The desktop UI](#the-desktop-ui) and [The video-capture design](#the-video-capture-design).)
 
 Other practices that keep the suites honest:
 
@@ -250,7 +283,7 @@ Ubuntu runner:
 
 | Job | Runs |
 |---|---|
-| **hygiene** | ShellCheck over every shell script; the git-hook tests (`.github/scripts/test-hooks.sh`); the Conventional Commits check over the commits of the push or pull request |
+| **hygiene** | ShellCheck over every shell script; the git-hook tests (`.github/scripts/test-hooks.sh`); the capture design's formula check and its mutation check; the Conventional Commits check over the commits of the push or pull request |
 | **core** | Release build of the core; the three C unit suites (ASan + UBSan); the integration suite; the behaviour suite (`--quick`) |
 | **core-sanitizers** | The core built with ASan + UBSan, then with ThreadSanitizer, each driven by the integration suite; `UBSAN_OPTIONS` and `TSAN_OPTIONS` are set to `halt_on_error=1`, so a report ends the run instead of scrolling past |
 | **daemon** | `mvn package` (compiles the daemon against real Spring and runs the build), the Java suites including the end-to-end suite against the real core, and the API smoke test against the jar that was just built |

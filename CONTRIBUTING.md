@@ -121,10 +121,14 @@ A change is not finished until its tests are. See [docs/TESTING.md](docs/TESTING
   bash tests/smoke_api.sh            # the built daemon's API defences; needs `make -C core` and `mvn -f daemon/pom.xml -DskipTests package`
   bash tests/run_engine_tests.sh     # C++ engine layer
   bash tests/run_ui_tests.sh         # the UI: lint, Jest, the Electron shell's tests, the production build (Node.js 20+)
+  python3 tests/capture_model_check.py   # the formulas of docs/VIDEO_CAPTURE.md (about a second)
   ```
 
 - **Changes to the core's threading, memory or I/O** also need a sanitizer run (ASan + UBSan, and TSan
   if threads are involved); the commands are in [docs/TESTING.md](docs/TESTING.md#sanitizer-builds).
+- **A formula in [docs/VIDEO_CAPTURE.md](docs/VIDEO_CAPTURE.md) changes together with its check**
+  (`tests/capture_model_check.py`). `python3 tests/mutation_capture.py` breaks each formula in turn to show
+  that the check would notice; CI runs both.
 - Tests must be deterministic. Script the server instead of racing it, and inject the clock where the
   code allows it.
 
