@@ -16,7 +16,6 @@ import { getBandwidthLimit } from "./api/stats";
 jest.mock("./hooks/useLiveSync"); /* the feed itself is tested on its own; here the store is driven by hand */
 jest.mock("./api/scheduler");
 jest.mock("./api/stats");
-jest.mock("./api/grabber");
 
 const MB = 1024 * 1024;
 const flush = () => act(async () => { for (let i = 0; i < 20; i++) await Promise.resolve(); });
@@ -52,7 +51,6 @@ describe("the views", () => {
   });
 
   test.each([
-    ["Video Grabber", "VIDEO GRABBER"],
     ["Scheduler", "SCHEDULER"],
     ["Settings", "SETTINGS"],
   ])("%s shows its own view, and the download list gives way", async (item, heading) => {
@@ -101,17 +99,6 @@ describe("what stays when another view is on show", () => {
     await go(user, "Scheduler");
     expect(addUrl({ hidden: true })).toBeInTheDocument();
     expect(addUrl({ hidden: true })).not.toBeVisible();
-  });
-
-  test("the video grabber keeps what was typed in it", async () => {
-    const { user } = await setup();
-    await go(user, "Video Grabber");
-    await user.type(screen.getByLabelText("ADDRESS OF A VIDEO PAGE"), "https://www.example.com/watch?v=abc");
-
-    await go(user, "Downloads");
-    await go(user, "Scheduler");
-    await go(user, "Video Grabber");
-    expect(screen.getByLabelText("ADDRESS OF A VIDEO PAGE")).toHaveValue("https://www.example.com/watch?v=abc");
   });
 });
 

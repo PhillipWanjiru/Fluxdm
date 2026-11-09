@@ -10,7 +10,7 @@ import { DAEMON_ORIGIN } from "./config";
 
 export class ApiError extends Error {
   /* kind: bad_request | unauthorized | forbidden | not_found | conflict | unavailable | server | http
-   *       | unreachable | timeout | cancelled | protocol | grabber | unknown */
+   *       | unreachable | timeout | cancelled | protocol | unknown */
   constructor(message, { kind = "unknown", status = null, cause } = {}) {
     super(message);
     this.name = "ApiError";

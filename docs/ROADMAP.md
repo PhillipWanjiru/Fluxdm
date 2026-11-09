@@ -27,8 +27,8 @@ follows dependencies and what hurts most, and it changes when something is learn
 - [x] Local API hardening: `Host` and `Origin` allow-lists, a bearer token on REST and STOMP, and a
       private directory for the IPC socket and for `~/.fluxdm` ([SECURITY.md](../SECURITY.md))
 - [x] Desktop UI connected to the daemon: the downloads list follows it live, with add, pause, resume,
-      retry and remove, real speeds, a Scheduler, a Video Grabber lookup, the global speed limit and the
-      daemon's health; the Electron shell serves the page as `app://-/` under a Content-Security-Policy
+      retry and remove, real speeds, a Scheduler, the global speed limit and the daemon's health; the
+      Electron shell serves the page as `app://-/` under a Content-Security-Policy
       ([ARCHITECTURE.md](ARCHITECTURE.md#4-the-desktop-ui))
 
 **Prototypes, not wired in yet:** the Manifest V3 extension, the Python video grabber, and the C++
@@ -165,5 +165,5 @@ Stated plainly, so nobody has to find them the hard way.
 | Progress | Aggregate only; no per-segment breakdown over IPC, so the UI's segment bars show the overall progress in steps. |
 | API | One token for all clients, readable by every program that runs as you; keep the API on `127.0.0.1` ([SECURITY.md](../SECURITY.md#known-limitations)). |
 | Engine layer | Not linked into the core. |
-| UI | Downloads go to a folder you type (no folder picker); a video grabbed through the Video Grabber is saved by the grabber in its own folder and does not appear in the list; scheduling needs a paused or failed download; the packaged app runs on Electron 29, which is out of support. |
+| UI | Downloads go to a folder you type (no folder picker); scheduling needs a paused or failed download; the packaged app runs on Electron 29, which is out of support. |
 | Extension, grabber | Prototypes. |

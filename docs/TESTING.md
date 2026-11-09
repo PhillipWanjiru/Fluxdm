@@ -165,7 +165,7 @@ Four commands in `ui/`, all run by the `ui` job in CI. None needs Electron's bin
 | Command | What it checks |
 |---|---|
 | `npm run lint` | ESLint over the sources, the tests and `electron/`, with no warnings allowed |
-| `npm test -- --watchAll=false` | The Jest suites (jsdom, React Testing Library): 459 tests in 38 suites |
+| `npm test -- --watchAll=false` | The Jest suites (jsdom, React Testing Library): 405 tests in 35 suites |
 | `npm run test:electron` | The Electron shell's rules with `node --test`: 50 tests against a stand-in for Electron |
 | `npm run build` | The production build, which treats lint warnings as errors (`CI=true`) |
 
@@ -198,8 +198,8 @@ survivor, that rule has no test: write one. The first run reported four, and tho
   already builds and drives the built page in a browser is on the roadmap's audit list.
 - *Electron itself.* The stand-in proves the wiring, not Electron's behaviour. During development the production
   build was served with exactly the headers the shell sends and driven in real Chromium against a stand-in daemon
-  that enforces the same Host, Origin and token rules: the page, its styles, the live feed, pause and resume, the
-  global limit and a video lookup work under the policy, and fourteen things it must refuse (inline script, a
+  that enforces the same Host, Origin and token rules: the page, its styles, the live feed, pause and resume and the
+  global limit work under the policy, and fourteen things it must refuse (inline script, a
   script, fetch, WebSocket, image, frame and font from elsewhere, an inline style, a `<style>` element, `<base>`,
   a form post, a plug-in, `eval`) are refused. That check is not in the repository. After upgrading Electron, run
   `npm run electron` once with the daemon up and look at the console.

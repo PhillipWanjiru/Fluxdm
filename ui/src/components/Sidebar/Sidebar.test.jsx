@@ -7,7 +7,6 @@ import Sidebar from "./Sidebar";
 
 const VIEWS = [
   { id: "downloads", label: "Downloads" },
-  { id: "grabber", label: "Video Grabber" },
   { id: "scheduler", label: "Scheduler" },
   { id: "settings", label: "Settings" },
 ];
@@ -27,22 +26,22 @@ describe("the sidebar", () => {
   test("lists the views, in order, as the main navigation", () => {
     setup();
     const nav = screen.getByRole("navigation", { name: "Main" });
-    expect(within(nav).getAllByRole("button").map((b) => b.textContent)).toEqual(["Downloads", "Video Grabber", "Scheduler", "Settings"]);
+    expect(within(nav).getAllByRole("button").map((b) => b.textContent)).toEqual(["Downloads", "Scheduler", "Settings"]);
   });
 
   test("marks the view on show as the current page, and only that one", () => {
     setup("scheduler");
     const nav = screen.getByRole("navigation", { name: "Main" });
     expect(within(nav).getByRole("button", { name: "Scheduler" })).toHaveAttribute("aria-current", "page");
-    for (const name of ["Downloads", "Video Grabber", "Settings"]) {
+    for (const name of ["Downloads", "Settings"]) {
       expect(within(nav).getByRole("button", { name })).not.toHaveAttribute("aria-current");
     }
   });
 
   test("goes to the view that was clicked", async () => {
     const { onNavigate, user } = setup();
-    await user.click(screen.getByRole("button", { name: "Video Grabber" }));
-    expect(onNavigate).toHaveBeenCalledWith("grabber");
+    await user.click(screen.getByRole("button", { name: "Settings" }));
+    expect(onNavigate).toHaveBeenCalledWith("settings");
     expect(onNavigate).toHaveBeenCalledTimes(1);
   });
 
@@ -52,7 +51,7 @@ describe("the sidebar", () => {
     expect(screen.getByRole("button", { name: "Downloads" })).toHaveFocus();
     await user.tab();
     await user.keyboard("{Enter}");
-    expect(onNavigate).toHaveBeenCalledWith("grabber");
+    expect(onNavigate).toHaveBeenCalledWith("scheduler");
   });
 
   test("shows the bandwidth and the daemon indicators under the navigation", () => {

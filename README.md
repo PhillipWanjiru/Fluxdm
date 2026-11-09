@@ -20,7 +20,7 @@ lock-free per download, while queueing, persistence, scheduling and the API live
 that talks to the core over a versioned binary protocol on a Unix socket.
 
 > **Status: early but real.** The C core and the daemon work end to end and are heavily tested.
-> The desktop UI drives the daemon (downloads, live progress, schedule, speed limit, video lookup) and
+> The desktop UI drives the daemon (downloads, live progress, schedule, speed limit) and
 > is covered by unit, component and browser checks, though not yet by an end-to-end test against the
 > real daemon. The browser extension and the video grabber are prototypes that are not wired in yet.
 > See [Project status](#project-status) and [docs/ROADMAP.md](docs/ROADMAP.md) for what is done and
@@ -98,7 +98,7 @@ specified in [docs/IPC_PROTOCOL.md](docs/IPC_PROTOCOL.md).
 | Engine layer | [`engine/`](engine) | C++17 | **Library, not wired in.** Segment tuning, buffers and BitTorrent building blocks; built and unit-tested standalone. |
 | Video grabber | [`grabber/`](grabber) | Python (FastAPI, yt-dlp) | **Prototype.** A thin yt-dlp wrapper with `/detect` and `/grab`; the daemon does not start it and its bridge is not aligned with it yet. |
 | Browser extension | [`extension/`](extension) | JavaScript (Manifest V3) | **Skeleton.** Cancels a browser download and announces it, but nothing receives the announcement yet: the hand-off to the daemon is a stub. Do not load it for everyday browsing. |
-| Desktop UI | [`ui/`](ui) | React, Redux, Electron | **Working.** Follows the daemon live; add, pause, resume, retry, remove; scheduler; video lookup; global speed limit; daemon health. Tested with Jest and in a browser; not yet run against the real daemon in CI. See [Run the desktop UI](#run-the-desktop-ui). |
+| Desktop UI | [`ui/`](ui) | React, Redux, Electron | **Working.** Follows the daemon live; add, pause, resume, retry, remove; scheduler; global speed limit; daemon health. Tested with Jest and in a browser; not yet run against the real daemon in CI. See [Run the desktop UI](#run-the-desktop-ui). |
 
 ## Getting started
 
@@ -176,8 +176,8 @@ Errors come back as `{"error": "..."}` with a fitting status (400, 404, 409, 503
 ### Run the desktop UI
 
 The UI needs Node.js 20 or later and a running daemon (see above). It lists your downloads and follows
-them live, adds, pauses, resumes, retries and removes them, schedules a paused or failed download, looks
-up the formats of a video page for the grabber, and sets the daemon's global speed limit.
+them live, adds, pauses, resumes, retries and removes them, schedules a paused or failed download, and
+sets the daemon's global speed limit.
 
 ```bash
 cd ui

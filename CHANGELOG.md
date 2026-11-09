@@ -28,11 +28,10 @@ contain incompatible changes; they are listed under **Changed** or **Removed** a
   a snapshot, then events, taken again after any gap) instead of polling, and shows the daemon's own progress,
   speed and time left. A download can be added (with a destination), paused, resumed, retried and removed, and the
   daemon's refusals appear in plain words. There are views for the Scheduler (resume a paused or failed download
-  at a time, once or repeating), the Video Grabber (look up a page's formats through the daemon, with cancel) and
-  Settings (the daemon's global speed limit). The sidebar shows the real total speed and the daemon's health, and
-  a banner says when the daemon or its core is gone.
+  at a time, once or repeating) and Settings (the daemon's global speed limit). The sidebar shows the real total
+  speed and the daemon's health, and a banner says when the daemon or its core is gone.
 - `npm run lint` (ESLint, no warnings allowed; CI runs it) and `npm run test:electron` (the Electron shell's rules
-  against a stand-in for Electron). 459 Jest tests and 50 shell tests; the CI `ui` job runs both, with the
+  against a stand-in for Electron). 405 Jest tests and 50 shell tests; the CI `ui` job runs both, with the
   production build. `tests/mutation_electron.py` breaks the shell's rules one at a time and checks that a test
   notices (72 changes; not part of CI).
 
@@ -56,6 +55,13 @@ contain incompatible changes; they are listed under **Changed** or **Removed** a
   channels are gone; nothing used them.
 - `npm run electron:dev` sets `NODE_ENV=development` for Electron. It used to load the production build while it
   waited for the dev server; now it shows the dev server, and ends it when the window closes.
+
+### Removed
+
+- **BREAKING:** the Video Grabber view of the desktop UI. It asked the daemon to look a page up with yt-dlp.
+  FluxDM is moving to what the browser itself plays, which needs no extractor; the design is in
+  [docs/VIDEO_CAPTURE.md](docs/VIDEO_CAPTURE.md). Until the capture exists, paste the address of the media
+  file into **+ ADD URL**.
 
 ### Security
 

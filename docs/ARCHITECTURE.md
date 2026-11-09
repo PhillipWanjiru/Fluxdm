@@ -63,7 +63,7 @@ flowchart LR
 | **Daemon** (`daemon/`) | The REST / STOMP API, the database, the concurrency queue, scheduled resumes, supervising the core, recovery after restarts | The transfer itself |
 | **IPC protocol** (`ipc/`) | The contract between the two (see [IPC_PROTOCOL.md](IPC_PROTOCOL.md)) | |
 | **Engine layer** (`engine/`) | C++17 building blocks: adaptive tuner, buffer manager, segment manager, bencode / metadata parser, peer discovery | Not linked into the core yet; built and unit-tested standalone |
-| **Desktop UI** (`ui/`) | Showing the daemon's state and sending it commands: downloads, schedule, video lookup, the global limit; the Electron shell that hosts it (see [section 4](#4-the-desktop-ui)) | Any download logic: it is a client of the daemon's API |
+| **Desktop UI** (`ui/`) | Showing the daemon's state and sending it commands: downloads, schedule, the global limit; the Electron shell that hosts it (see [section 4](#4-the-desktop-ui)) | Any download logic: it is a client of the daemon's API |
 | **Grabber, extension** | Prototypes of the video-grabber service and the browser hand-off | Not wired in yet |
 
 The split is deliberate. The transfer path is where latency, memory and system-call overhead matter, so
@@ -387,11 +387,11 @@ flowchart LR
 
 | Folder | Holds |
 |---|---|
-| `src/api/` | One module per daemon resource (`downloads`, `scheduler`, `grabber`, `stats` for health, `live` for the STOMP feed). `client.js` adds the token (read once, and again after a `401`); `errors.js` turns every failure into an `ApiError` with a `kind` and a message that is fit to show. |
+| `src/api/` | One module per daemon resource (`downloads`, `scheduler`, `stats` for health, `live` for the STOMP feed). `client.js` adds the token (read once, and again after a `401`); `errors.js` turns every failure into an `ApiError` with a `kind` and a message that is fit to show. |
 | `src/model/` | Pure functions, tested without React: the daemon's JSON and statuses (0 to 4) to the states the UI shows, validation of a destination, a URL and a schedule, formatting, the decision tree behind the connection banner and the sidebar indicator. |
 | `src/store/` | Redux Toolkit slices (downloads, settings, bandwidth, connection) and `liveSync.js`. |
 | `src/hooks/` | `useLiveSync`, `useBandwidthSync`, `useSettings`, `useSpeedHistory`. |
-| `src/components/` | The four views (Downloads, Video Grabber, Scheduler, Settings), the sidebar and the dialogs. |
+| `src/components/` | The three views (Downloads, Scheduler, Settings), the sidebar and the dialogs. |
 | `electron/` | The desktop shell (4.4). |
 
 ### 4.2 Staying in step with the daemon
@@ -408,11 +408,10 @@ message for both the banner and the indicator.
 
 ### 4.3 Views
 
-Downloads and the Video Grabber stay mounted while another view is shown (hidden, not unmounted), so a lookup
-that is under way and the live speed graph are not lost; Scheduler and Settings mount when shown and read the
-daemon afresh. The two slow calls (looking up a video page and grabbing it) can be given up on, and every failure is shown, not swallowed. The
-bandwidth setting is the daemon's (`GET` / `PUT /api/bandwidth`), shown in KB/s and sent in bytes/s; the grabber
-saves a video in its own download folder and the file does not appear in the downloads list (roadmap item 5).
+Downloads stays mounted while another view is shown (hidden, not unmounted), so its tab and the live speed graph
+are not lost; Scheduler and Settings mount when shown and read the daemon afresh. Every failure is shown, not
+swallowed. The bandwidth setting is the daemon's (`GET` / `PUT /api/bandwidth`), shown in KB/s and sent in
+bytes/s.
 
 ### 4.4 The Electron shell
 
