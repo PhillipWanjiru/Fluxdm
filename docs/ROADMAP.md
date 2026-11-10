@@ -31,8 +31,7 @@ follows dependencies and what hurts most, and it changes when something is learn
       Electron shell serves the page as `app://-/` under a Content-Security-Policy
       ([ARCHITECTURE.md](ARCHITECTURE.md#4-the-desktop-ui))
 
-**Prototypes, not wired in yet:** the Manifest V3 extension, the Python video grabber, and the C++
-engine layer.
+**Prototypes, not wired in yet:** the Manifest V3 extension and the C++ engine layer.
 
 ## Next
 
@@ -49,22 +48,27 @@ In rough order. Each item says what it depends on, so the order is not arbitrary
 3. **Request headers in `START`.** Cookies, `Referer` and `User-Agent` are what make a browser
    hand-off work for downloads behind a login. Today the protocol has no place for them. Needs a
    protocol extension and daemon support first, then:
-4. **Browser-extension hand-off.** Today the extension cancels the browser's download and nothing
-   receives the URL: the native-messaging host only acknowledges messages. Pass URL and headers to the
-   daemon through the host (with the API token, which the host can read from `~/.fluxdm/api-token`), and
-   show progress in the popup. The same hand-off can carry **the media a page plays**: tools in IDM's
-   family are understood to watch the page's own media requests (an extension can see them with
-   `webRequest`) and pass the URL and headers on, which is why they do not depend on a site-specific
-   extractor. Vendors do not document this, so treat it as inference. FluxDM then has two routes to a
-   video: this capture, and yt-dlp through the grabber (current yt-dlp releases may need an external
-   JavaScript runtime for YouTube; check that the grabber's environment has one).
-5. **Grabber service.** Start and supervise the Python service from the daemon (it is expected at a
-   hard-coded `http://127.0.0.1:17172` today), and let a page URL turn into a format choice and then into
-   an ordinary download. Known problems to fix on the way: the daemon forwards `url` and `format_id`
-   without URL-encoding, so an address containing `&`, `#` or `+` is cut or altered; it reports a failed
-   call as HTTP 200 with an `error` field; and the service's `/grab` downloads the whole file inside its
-   event loop before it answers, into its own folder, so the file bypasses FluxDM's downloader and is
-   not listed.
+4. **Browser-extension hand-off, and video capture.** Today the extension cancels the browser's download
+   and nothing receives the URL: the native-messaging host only acknowledges messages. Pass URL and headers
+   to the daemon through the host (with the API token, which the host can read from `~/.fluxdm/api-token`),
+   and show progress in the popup. The same hand-off carries **the media a page plays**, which is how FluxDM
+   will download videos: not with an extractor such as yt-dlp, which has to follow every site's player, but
+   the way IDM's FAQ describes its own extension, which "examines all sent and received data from websites to
+   detect download links". The extension watches the requests the page's player makes (`webRequest`),
+   recognises the media, and hands the address and the headers to the daemon. The design is
+   [VIDEO_CAPTURE.md](VIDEO_CAPTURE.md), as mathematics with an executable check of its formulas; its
+   [build order](VIDEO_CAPTURE.md#13-build-order) takes single and chunked files here, HLS next (item 5),
+   then DASH, address refresh and capture by playback. Two assumptions are confirmed on a real browser before
+   the extension is built on them: that a Manifest V3 `webRequest` listener sees `Cookie` and `Referer`, and
+   that it does not see `Authorization` (Chrome's reference lists it among the headers it does not provide).
+5. **Segment jobs.** An HLS or DASH stream is not one file but hundreds of small requests in a fixed order,
+   some of them encrypted, and the core's download of one file cannot express that. Add a job that is a list
+   of requests (address, optional byte range, optional AES-128 key and IV), fetched on several connections,
+   written in order inside a bounded window, retried and checked per segment, and resumed at segment
+   granularity; the daemon reads the manifest and plans the job (variant, size ceiling, free space). Needs a
+   protocol extension and items 3 and 4. The number of connections and the size of the window come from the
+   model in [VIDEO_CAPTURE.md](VIDEO_CAPTURE.md#7-fetching-how-fast-and-in-what-order), whose parameters the
+   measurements of item 7 supply.
 6. **Validate on every segment.** Send `If-Range` with the probe's validator and compare `ETag` /
    `Last-Modified` on each response, so a file that changes in place *without changing size* during a
    single run is detected. Today only a size change is caught outside a resume.
@@ -109,12 +113,12 @@ In rough order. Each item says what it depends on, so the order is not arbitrary
 ## Before 1.0: the audit
 
 Before a 1.0 release the whole project gets one pass, from the first phase (the C core) outward through the
-engine layer, the daemon, the grabber and the extension, and the UI. The goal is industry-grade code that
+engine layer, the daemon, the extension and the UI. The goal is industry-grade code that
 installs and runs reliably on a machine that is not the author's:
 
 - **Refactor and optimise** what the phases left rough; **remove the stubs** and everything nothing uses.
 - **Make it installable elsewhere.** No path tailored to one desktop (the daemon's default core path is
-  `~/Desktop/fluxdm/core/fluxdm-core`; the grabber's address is fixed in the daemon), a `systemd --user` unit
+  `~/Desktop/fluxdm/core/fluxdm-core`), a `systemd --user` unit
   and a `.deb`, a documented install and upgrade, and a clean-machine test in CI.
 - **Hold every part to the same standard**: lint, tests and sanitizers where they apply, documented behaviour,
   no warnings.
@@ -143,8 +147,6 @@ Candidates found so far: a list to start from, not the audit.
 
 *Daemon*
 
-- `GrabberService` does not URL-encode what it forwards, and `PythonBridge` returns errors as HTTP 200 (see
-  "Grabber service" above).
 - The STOMP broker sends no heartbeats, so a half-open connection is noticed only by the client's own timeout.
 - Check against the running daemon what it answers to SockJS's credentialed `GET /ws/info` from `app://-` and
   from `http://localhost:3000` (the UI's tests and the browser check used stand-ins).
@@ -166,4 +168,5 @@ Stated plainly, so nobody has to find them the hard way.
 | API | One token for all clients, readable by every program that runs as you; keep the API on `127.0.0.1` ([SECURITY.md](../SECURITY.md#known-limitations)). |
 | Engine layer | Not linked into the core. |
 | UI | Downloads go to a folder you type (no folder picker); scheduling needs a paused or failed download; the packaged app runs on Electron 29, which is out of support. |
-| Extension, grabber | Prototypes. |
+| Extension | A prototype. |
+| Video | None yet. Capture from the browser is designed ([VIDEO_CAPTURE.md](VIDEO_CAPTURE.md)) and not built; streams protected by DRM will not be captured. |

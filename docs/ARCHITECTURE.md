@@ -37,7 +37,6 @@ flowchart LR
         GATE["per-host gate"]
     end
 
-    GR["Grabber<br/>(Python, yt-dlp, prototype)"]
     ORIGIN(("HTTP / HTTPS<br/>origin servers"))
 
     UI --> REST
@@ -54,7 +53,6 @@ flowchart LR
     IPC --> W
     W --> GATE
     W <--> ORIGIN
-    DS -.-> GR
 ```
 
 | Component | Owns | Does not own |
@@ -64,7 +62,7 @@ flowchart LR
 | **IPC protocol** (`ipc/`) | The contract between the two (see [IPC_PROTOCOL.md](IPC_PROTOCOL.md)) | |
 | **Engine layer** (`engine/`) | C++17 building blocks: adaptive tuner, buffer manager, segment manager, bencode / metadata parser, peer discovery | Not linked into the core yet; built and unit-tested standalone |
 | **Desktop UI** (`ui/`) | Showing the daemon's state and sending it commands: downloads, schedule, the global limit; the Electron shell that hosts it (see [section 4](#4-the-desktop-ui)) | Any download logic: it is a client of the daemon's API |
-| **Grabber, extension** | Prototypes of the video-grabber service and the browser hand-off | Not wired in yet |
+| **Browser extension** | A prototype of the hand-off from the browser; video capture is designed in [VIDEO_CAPTURE.md](VIDEO_CAPTURE.md) | Not wired in yet |
 
 The split is deliberate. The transfer path is where latency, memory and system-call overhead matter, so
 it is C with no runtime between it and the kernel. Everything that benefits from a mature ecosystem
@@ -276,7 +274,6 @@ UTF-8 character boundaries when they exceed the fixed 124-byte field.
 | `IPCBridgeService` | Finds, adopts or spawns the core, supervises it, shuts it down. |
 | `SchedulerService` | Resumes a download at a `triggerAt` time, optionally repeating. |
 | `BandwidthService` | The daemon-wide speed limit. |
-| `GrabberService`, `PythonBridge` | Hand-off to the video-grabber service (prototype). |
 
 ### 3.2 Starting a download
 

@@ -22,7 +22,7 @@ that talks to the core over a versioned binary protocol on a Unix socket.
 > **Status: early but real.** The C core and the daemon work end to end and are heavily tested.
 > The desktop UI drives the daemon (downloads, live progress, schedule, speed limit) and
 > is covered by unit, component and browser checks, though not yet by an end-to-end test against the
-> real daemon. The browser extension and the video grabber are prototypes that are not wired in yet.
+> real daemon. The browser extension is a prototype that is not wired in yet.
 > See [Project status](#project-status) and [docs/ROADMAP.md](docs/ROADMAP.md) for what is done and
 > what is not.
 
@@ -96,8 +96,7 @@ specified in [docs/IPC_PROTOCOL.md](docs/IPC_PROTOCOL.md).
 | IPC protocol | [`ipc/`](ipc) | C headers | **Stable**, protocol version 1. |
 | Daemon | [`daemon/`](daemon) | Java 21, Spring Boot 3.2 | **Working.** REST, STOMP, SQLite, queue, recovery. Tested with a harness; `mvn package` builds it. |
 | Engine layer | [`engine/`](engine) | C++17 | **Library, not wired in.** Segment tuning, buffers and BitTorrent building blocks; built and unit-tested standalone. |
-| Video grabber | [`grabber/`](grabber) | Python (FastAPI, yt-dlp) | **Prototype.** A thin yt-dlp wrapper with `/detect` and `/grab`; the daemon does not start it and its bridge is not aligned with it yet. |
-| Browser extension | [`extension/`](extension) | JavaScript (Manifest V3) | **Skeleton.** Cancels a browser download and announces it, but nothing receives the announcement yet: the hand-off to the daemon is a stub. Do not load it for everyday browsing. |
+| Browser extension | [`extension/`](extension) | JavaScript (Manifest V3) | **Skeleton.** Cancels a browser download and announces it, but nothing receives the announcement yet: the hand-off to the daemon is a stub. Do not load it for everyday browsing. Video capture is [designed](docs/VIDEO_CAPTURE.md), not built. |
 | Desktop UI | [`ui/`](ui) | React, Redux, Electron | **Working.** Follows the daemon live; add, pause, resume, retry, remove; scheduler; global speed limit; daemon health. Tested with Jest and in a browser; not yet run against the real daemon in CI. See [Run the desktop UI](#run-the-desktop-ui). |
 
 ## Getting started
@@ -257,7 +256,6 @@ core/        C11 download engine: epoll loop, segments, HTTP/HTTPS, resume, host
 ipc/         Wire-protocol headers shared by the core and the daemon (protocol v1)
 daemon/      Spring Boot daemon: REST, STOMP, SQLite, queue, scheduler, core supervisor
 engine/      C++17 engine layer (segment tuning, buffers, BitTorrent building blocks)
-grabber/     Python video-grabber service (FastAPI + yt-dlp), prototype
 extension/   Browser extension (Manifest V3), prototype
 ui/          React + Electron desktop UI
 db/          Reference SQL schema, migrations and seed data
@@ -276,8 +274,9 @@ docs/        Architecture, protocol, rate limiting, testing, roadmap
 ## Roadmap
 
 Next up, in rough order: a "waiting for server" state in the daemon and UI, per-segment progress, the
-browser-extension hand-off (including capturing the media a page plays), the grabber service, and a measured
-comparison with curl, wget and aria2 that decides what the engine layer should take on. Before 1.0 the whole
+browser-extension hand-off, including video capture by watching the requests a page's player makes
+([design](docs/VIDEO_CAPTURE.md)), segment jobs for HLS and DASH streams, and a measured comparison with
+curl, wget and aria2 that decides what the engine layer should take on. Before 1.0 the whole
 project gets an audit. The full list, including known limitations, is in [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ## Contributing

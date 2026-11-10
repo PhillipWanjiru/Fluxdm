@@ -66,7 +66,7 @@ changelog and its audit trail, and a hook checks the format.
 
 | Type | Use for |
 |---|---|
-| `feat` | New behaviour a user or client can observe |
+| `feat` | New behaviour a user or client can observe, or the removal of behaviour they could rely on (with `!`) |
 | `fix` | A bug fix |
 | `perf` | A change whose purpose is speed or memory, with no behaviour change |
 | `refactor` | Restructuring without a behaviour change |
@@ -78,8 +78,8 @@ changelog and its audit trail, and a hook checks the format.
 | `chore` | Anything else that does not touch the product (repository housekeeping, archives) |
 | `revert` | Reverting an earlier commit |
 
-**Scopes** are optional; prefer one of: `core`, `ipc`, `daemon`, `engine`, `grabber`, `extension`,
-`ui`, `tests`, `db`, `config`, `build`, `ci`, `docs`.
+**Scopes** are optional; prefer one of: `core`, `ipc`, `daemon`, `engine`, `extension`, `ui`,
+`tests`, `db`, `config`, `build`, `ci`, `docs`.
 
 **Rules**
 
@@ -164,7 +164,7 @@ A change is not finished until its tests are. See [docs/TESTING.md](docs/TESTING
   rules one at a time to show whether the tests would notice (about three minutes; not part of CI).
 - Component tests find things the way a user does, by role and name, not by id or selector.
 
-**Python (tests, grabber)**
+**Python (tests)**
 - Tests use the standard library only. Target Python 3.10 or newer.
 
 **Everything**

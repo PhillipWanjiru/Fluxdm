@@ -62,6 +62,10 @@ contain incompatible changes; they are listed under **Changed** or **Removed** a
   FluxDM is moving to what the browser itself plays, which needs no extractor; the design is in
   [docs/VIDEO_CAPTURE.md](docs/VIDEO_CAPTURE.md). Until the capture exists, paste the address of the media
   file into **+ ADD URL**.
+- **BREAKING:** `POST /api/grabber/detect` and `POST /api/grabber/grab`, and the Python service they
+  forwarded to (`grabber/`: FastAPI and yt-dlp), together with the daemon's `GrabberController`,
+  `GrabberService` and `PythonBridge`. The endpoints are gone (`404`). The service was a prototype that the
+  daemon never started, and the log section `[grabber]` of `config/logging.conf` went with it.
 
 ### Security
 

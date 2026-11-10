@@ -37,7 +37,7 @@ body:
         - Daemon (Java code in daemon/)
         - Tests or CI
         - Documentation
-        - Prototype (desktop UI / browser extension / video grabber)
+        - Prototype (desktop UI / browser extension)
         - Not sure
     validations:
       required: true

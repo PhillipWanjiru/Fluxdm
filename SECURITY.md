@@ -42,7 +42,7 @@ time to fix the problem before you disclose it.
 
 **Out of scope**
 
-- The browser extension and the video grabber, which are prototypes ([ROADMAP](docs/ROADMAP.md)).
+- The browser extension, which is a prototype ([ROADMAP](docs/ROADMAP.md)).
 - Exposing the daemon beyond `127.0.0.1`, which is unsupported (see below).
 - Denial of service by someone who is already allowed to use the API.
 - Attacks that need root or the same user account on the machine.
