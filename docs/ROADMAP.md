@@ -127,13 +127,18 @@ Candidates found so far: a list to start from, not the audit.
 
 *UI and shell*
 
-- Unused code: `components/Sidebar/CategoryList.jsx`, `electron/tray.js`, `getStats` in `api/stats.js`.
+- Unused code: `components/Sidebar/CategoryList.jsx`, `electron/tray.js`, and three API wrappers that only the
+  tests call: `getOne` and `setLimit` in `api/downloads.js`, `getStats` in `api/stats.js`.
 - One shared modal with a focus trap and focus return; the three dialogs repeat their overlay code and none
   returns focus to what opened it.
 - Electron 29 is no longer supported upstream: move to a supported major, then re-run the shell's tests and a
   real-Electron smoke test. `react-scripts` is unmaintained (its build tooling carries 15 high-severity advisories,
   none of them in the shipped app: `npm audit --omit=dev` reports none): move to Vite. recharts 2 is deprecated:
   move to 3.
+- Install scripts: of the 1,423 packages in the lockfile, four declare them: `electron` (it downloads its
+  binary), `core-js` and `core-js-pure` (they print a funding notice) and `fsevents` (macOS only). Only
+  Electron's is needed. When the npm in use can restrict install scripts to an allow-list, adopt it, so that a
+  future dependency's script does not run unasked.
 - Dim text (`--text-dim: #666` on `#0a0a0a`) is about 3.5 : 1, under the 4.5 : 1 that WCAG AA asks of small text.
 - When the daemon is lost the list keeps showing the last state it reported (running, with speeds) and only the
   banner says the connection is gone; consider marking the rows stale.
@@ -144,12 +149,15 @@ Candidates found so far: a list to start from, not the audit.
   place of the stand-ins the UI is tested against today.
 - The packaged app needs `chrome-sandbox` set up by hand on Ubuntu 24.04 and later ([README](../README.md#run-the-desktop-ui));
   a `.deb` should do it.
+- The packaged window keeps Electron's default menu, which includes Reload and Toggle Developer Tools. Set a
+  menu of our own (or none) and decide whether developer tools stay available in a packaged build.
 
 *Daemon*
 
 - The STOMP broker sends no heartbeats, so a half-open connection is noticed only by the client's own timeout.
-- Check against the running daemon what it answers to SockJS's credentialed `GET /ws/info` from `app://-` and
-  from `http://localhost:3000` (the UI's tests and the browser check used stand-ins).
+- SockJS's credentialed `GET /ws/info` is answered from `app://-`: the built UI, run by hand in Electron against
+  the real daemon, connects and stays connected. What the daemon answers from `http://localhost:3000`, the
+  development server, is still unchecked; the UI's tests and the browser check use stand-ins.
 
 ## Known limitations
 

@@ -194,7 +194,10 @@ survivor, that rule has no test: write one. The first run reported four, and tho
 **What is not covered, and how it was checked instead.**
 
 - *The real daemon.* The UI is tested against the API as documented in the README and exercised by
-  `tests/smoke_api.sh`, not against a running daemon. An end-to-end job that starts the daemon the `daemon` job
+  `tests/smoke_api.sh`, not against a running daemon, and CI does not run it against one. It has been run by
+  hand: the built page, served by Electron 29.4.6 as `app://-/`, connected to the real daemon on Ubuntu over
+  STOMP (so the daemon answers SockJS's credentialed `GET /ws/info` from that origin), listed the downloads the
+  daemon already had, and a download finished. An end-to-end job that starts the daemon the `daemon` job
   already builds and drives the built page in a browser is on the roadmap's audit list.
 - *Electron itself.* The stand-in proves the wiring, not Electron's behaviour. During development the production
   build was served with exactly the headers the shell sends and driven in real Chromium against a stand-in daemon
