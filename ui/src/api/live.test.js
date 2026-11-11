@@ -149,12 +149,22 @@ describe("the live feed", () => {
     const f = feedOn(server, { token: async () => current, retoken: async () => current });
     await waitFor(() => expect(f.links()).toContain(Link.UNAUTHORIZED));
 
+    const mark = f.links().length;
     server.refuse(100); // the daemon goes away; what the next attempts meet is "cannot connect"
-    await waitFor(() => expect(f.links().at(-1)).toBe(Link.OFFLINE));
-    expect(f.links().at(-1)).toBe(Link.OFFLINE);
+    await waitFor(() => expect(f.links().slice(mark)).toContain(Link.OFFLINE));
+
+    // While nothing is listening the feed alternates between "connecting" (an attempt is under way) and "offline"
+    // (it failed), so which of the two is the last entry at a given instant is down to timers, and a test that
+    // looks at the last entry fails when the machine is slow. What does not depend on timing: from the first
+    // "offline" on, the refusal is never reported again.
+    const since = f.links().slice(mark);
+    const fromOffline = since.slice(since.indexOf(Link.OFFLINE));
+    expect(fromOffline.every((link) => link === Link.OFFLINE || link === Link.CONNECTING)).toBe(true);
+
     current = "right";
     server.refuse(0);
     await live(f);
+    expect(f.links().at(-1)).toBe(Link.LIVE);
   });
 
   test("close() ends it: the socket is closed, nothing is reported, and it does not reconnect", async () => {
