@@ -67,6 +67,20 @@ contain incompatible changes; they are listed under **Changed** or **Removed** a
   `GrabberService` and `PythonBridge`. The endpoints are gone (`404`). The service was a prototype that the
   daemon never started, and the log section `[grabber]` of `config/logging.conf` went with it.
 
+### Fixed
+
+- **The C++ engine's parsers no longer trust the files they read** (the engine is not linked into the product
+  yet, so nothing shipped was affected). Fuzzing and Valgrind found: a `.torrent` nested 100,000 levels deep
+  overflowed the stack, as did a `Content-Disposition` file name of 30 KB or more (`std::regex` recursion; the
+  core refuses a response head above 16 KB, so it never got that far); a string length near 2^64 wrapped past
+  the bounds check, and numbers such as `i+5e` and `i5xe` were read as 5; a file path such as `../x` inside a
+  torrent was accepted; the SHA-1 info-hash was taken from a re-encoded copy of the dictionary instead of the
+  file's own bytes, so it was wrong whenever the keys were not already sorted; the last piece was always given
+  the full piece length; some fields were never initialised; and the base32 decoder shifted a signed value.
+  The parser now limits nesting, checks every length before it uses it, accepts only plain names as path
+  components, and hashes the bytes it was given. `tests/test_engine.cpp` gained 63 checks; against the old
+  code they crash the process, and 31 of the others fail.
+
 ### Security
 
 - **The local API checks where every request comes from.** `Host` must be a loopback name, which stops DNS

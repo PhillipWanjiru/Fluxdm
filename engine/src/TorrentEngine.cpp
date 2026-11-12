@@ -10,6 +10,7 @@
 #include <cstring>
 #include <regex>
 #include <cctype>
+#include <charconv>
 
 namespace fluxdm {
 
@@ -17,11 +18,25 @@ namespace fluxdm {
  * Bencode parser
  * ══════════════════════════════════════════════════════════════════════════ */
 
+/* The decimal number in data[first, last): optional '-', then digits only (no sign, no spaces, no trailing text),
+ * at most 19 of them, so that it fits an int64. Anything else is malformed. */
+static int64_t bencode_number(const std::string& data, size_t first, size_t last) {
+    int64_t n = 0;
+    const char* b = data.data() + first;
+    const char* e = data.data() + last;
+    if (b == e) throw std::runtime_error("bencode: empty number");
+    auto r = std::from_chars(b, e, n);
+    if (r.ec != std::errc() || r.ptr != e) throw std::runtime_error("bencode: bad number");
+    return n;
+}
+
 std::shared_ptr<BencodeValue> BencodeValue::parse(const std::string& data,
-                                                   size_t& pos) {
+                                                   size_t& pos, unsigned depth) {
     if (pos >= data.size()) return nullptr;
+    if (depth > MAX_DEPTH) throw std::runtime_error("bencode: nested too deeply");
 
     auto v = std::make_shared<BencodeValue>();
+    v->begin = pos;
 
     char c = data[pos];
 
@@ -31,7 +46,7 @@ std::shared_ptr<BencodeValue> BencodeValue::parse(const std::string& data,
         size_t end = data.find('e', pos);
         if (end == std::string::npos) throw std::runtime_error("bencode: bad int");
         v->type    = Type::Int;
-        v->int_val = std::stoll(data.substr(pos, end - pos));
+        v->int_val = bencode_number(data, pos, end);
         pos = end + 1;
 
     } else if (c == 'l') {
@@ -39,7 +54,7 @@ std::shared_ptr<BencodeValue> BencodeValue::parse(const std::string& data,
         ++pos;
         v->type = Type::List;
         while (pos < data.size() && data[pos] != 'e') {
-            auto item = parse(data, pos);
+            auto item = parse(data, pos, depth + 1);
             if (!item) break;
             v->list_val.push_back(item);
         }
@@ -50,9 +65,9 @@ std::shared_ptr<BencodeValue> BencodeValue::parse(const std::string& data,
         ++pos;
         v->type = Type::Dict;
         while (pos < data.size() && data[pos] != 'e') {
-            auto key = parse(data, pos);
+            auto key = parse(data, pos, depth + 1);
             if (!key || key->type != Type::Str) break;
-            auto val = parse(data, pos);
+            auto val = parse(data, pos, depth + 1);
             if (!val) break;
             v->dict_val[key->str_val] = val;
         }
@@ -62,17 +77,19 @@ std::shared_ptr<BencodeValue> BencodeValue::parse(const std::string& data,
         /* Byte string: <len>:<bytes> */
         size_t colon = data.find(':', pos);
         if (colon == std::string::npos) throw std::runtime_error("bencode: bad str");
-        size_t len = std::stoull(data.substr(pos, colon - pos));
+        int64_t len = bencode_number(data, pos, colon);
         pos = colon + 1;
-        if (pos + len > data.size()) throw std::runtime_error("bencode: str truncated");
+        /* compared as "len > what is left", not "pos + len > size", which wraps for a huge len */
+        if (len < 0 || static_cast<uint64_t>(len) > data.size() - pos) throw std::runtime_error("bencode: str truncated");
         v->type    = Type::Str;
-        v->str_val = data.substr(pos, len);
-        pos += len;
+        v->str_val = data.substr(pos, static_cast<size_t>(len));
+        pos += static_cast<size_t>(len);
 
     } else {
         throw std::runtime_error(std::string("bencode: unexpected char '") + c + "'");
     }
 
+    v->end = pos;
     return v;
 }
 
@@ -135,17 +152,19 @@ std::string TorrentEngine::url_encode_hash(const std::string& raw) {
 std::string TorrentEngine::base32_decode(const std::string& encoded) {
     static const std::string alpha = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
     std::string result;
-    int buffer = 0, bits = 0;
+    uint32_t buffer = 0;   /* unsigned, and cut back to the bits not yet used: a signed int overflowed here (UB) */
+    int      bits   = 0;
     for (char c : encoded) {
-        c = std::toupper(static_cast<unsigned char>(c));
+        c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
         if (c == '=') break;
         auto pos = alpha.find(c);
         if (pos == std::string::npos) continue;
-        buffer = (buffer << 5) | static_cast<int>(pos);
+        buffer = (buffer << 5) | static_cast<uint32_t>(pos);
         bits  += 5;
         if (bits >= 8) {
-            result += static_cast<char>((buffer >> (bits - 8)) & 0xFF);
-            bits -= 8;
+            result += static_cast<char>((buffer >> (bits - 8)) & 0xFFu);
+            bits   -= 8;
+            buffer &= (1u << bits) - 1u;
         }
     }
     return result;
@@ -274,13 +293,31 @@ bool TorrentEngine::load_bytes(const std::vector<uint8_t>& data) {
 bool TorrentEngine::parse_torrent(const std::string& raw) {
     std::shared_ptr<BencodeValue> root;
     try { root = bencode_parse(raw); }
-    catch (const std::exception& e) { return false; }
+    catch (const std::exception&) { return false; }
 
     if (!root || root->type != BencodeValue::Type::Dict) return false;
-    return extract_info(*root);
+    info_ = TorrentInfo{};
+    piece_availability_.clear();
+    if (!extract_info(*root, raw)) { info_ = TorrentInfo{}; return false; }
+    return true;
 }
 
-bool TorrentEngine::extract_info(const BencodeValue& root) {
+/* A name that becomes part of a path on disk: one plain component. A torrent is untrusted input, and a path such as
+ * "../../.bashrc" or "/etc/cron.d/x" in it would put a file outside the download directory. */
+static bool plain_component(const std::string& s) {
+    if (s.empty() || s == "." || s == "..") return false;
+    for (char ch : s) {
+        const unsigned char c = static_cast<unsigned char>(ch);
+        if (c == '/' || c == '\\' || c < 0x20 || c == 0x7f) return false;
+    }
+    return true;
+}
+
+/* Sizes that keep every sum and product in this file inside 64 bits. */
+static constexpr int64_t MAX_TORRENT_BYTES = int64_t{1} << 60;
+static constexpr int64_t MAX_PIECE_BYTES   = int64_t{1} << 30;
+
+bool TorrentEngine::extract_info(const BencodeValue& root, const std::string& raw) {
     const auto& d = root.dict_val;
 
     /* announce */
@@ -316,40 +353,56 @@ bool TorrentEngine::extract_info(const BencodeValue& root) {
 
     /* info dict */
     auto info_it = d.find("info");
-    if (info_it == d.end()) return false;
+    if (info_it == d.end() || info_it->second->type != BencodeValue::Type::Dict) return false;
     const auto& info = info_it->second->dict_val;
 
     auto nm = info.find("name");
-    if (nm != info.end()) info_.name = nm->second->str_val;
+    if (nm != info.end()) {
+        info_.name = nm->second->str_val;
+        if (!plain_component(info_.name)) return false;
+    }
 
     auto pl = info.find("piece length");
-    if (pl == info.end()) return false;
-    info_.piece_length = static_cast<uint32_t>(pl->second->int_val);
+    if (pl == info.end() || pl->second->type != BencodeValue::Type::Int) return false;
+    const int64_t piece_length = pl->second->int_val;
+    if (piece_length < 1 || piece_length > MAX_PIECE_BYTES) return false;
+    info_.piece_length = static_cast<uint32_t>(piece_length);
 
     auto pcs = info.find("pieces");
-    if (pcs == info.end()) return false;
-    build_piece_list(pcs->second->str_val);
+    if (pcs == info.end() || pcs->second->type != BencodeValue::Type::Str) return false;
+    const std::string& pieces_str = pcs->second->str_val;
+    if (pieces_str.empty() || pieces_str.size() % 20 != 0) return false;
 
     auto priv = info.find("private");
     if (priv != info.end()) info_.is_private = priv->second->int_val != 0;
 
-    /* Single-file vs multi-file */
+    /* Single-file vs multi-file. The total size has to be known before the pieces can be laid out, and every
+     * length, path and count is checked here: they all come from the torrent. */
     auto files = info.find("files");
     if (files != info.end()) {
         /* Multi-file */
+        if (files->second->type != BencodeValue::Type::List || files->second->list_val.empty()) return false;
+        int64_t total = 0;
         for (const auto& file : files->second->list_val) {
+            if (file->type != BencodeValue::Type::Dict) return false;
             TorrentFile tf;
             auto flen = file->dict_val.find("length");
-            if (flen != file->dict_val.end())
-                tf.length = static_cast<uint64_t>(flen->second->int_val);
+            if (flen == file->dict_val.end() || flen->second->type != BencodeValue::Type::Int) return false;
+            const int64_t len = flen->second->int_val;
+            if (len < 0 || len > MAX_TORRENT_BYTES) return false;
+            total += len;                                   /* both terms are below 2^60 */
+            if (total > MAX_TORRENT_BYTES) return false;
+            tf.length = static_cast<uint64_t>(len);
+
             auto fpath = file->dict_val.find("path");
-            if (fpath != file->dict_val.end()) {
-                bool first = true;
-                for (const auto& comp : fpath->second->list_val) {
-                    if (!first) tf.path += "/";
-                    tf.path += comp->str_val;
-                    first = false;
-                }
+            if (fpath == file->dict_val.end() || fpath->second->type != BencodeValue::Type::List
+                || fpath->second->list_val.empty()) return false;
+            bool first = true;
+            for (const auto& comp : fpath->second->list_val) {
+                if (comp->type != BencodeValue::Type::Str || !plain_component(comp->str_val)) return false;
+                if (!first) tf.path += "/";
+                tf.path += comp->str_val;
+                first = false;
             }
             info_.files.push_back(tf);
         }
@@ -357,20 +410,27 @@ bool TorrentEngine::extract_info(const BencodeValue& root) {
     } else {
         /* Single file */
         auto flen = info.find("length");
-        if (flen != info.end())
-            info_.total_size = static_cast<uint64_t>(flen->second->int_val);
+        if (flen == info.end() || flen->second->type != BencodeValue::Type::Int) return false;
+        const int64_t len = flen->second->int_val;
+        if (len < 0 || len > MAX_TORRENT_BYTES) return false;
+        info_.total_size = static_cast<uint64_t>(len);
     }
+    if (info_.total_size == 0) return false;
 
-    /* Compute info_hash — SHA1 of the bencoded 'info' dictionary */
-    const BencodeValue info_val{ BencodeValue::Type::Dict, 0, {}, {}, info_it->second->dict_val };
-    std::string encoded_info = bencode_encode(info_val);
-    info_.info_hash_raw = std::string(
-        reinterpret_cast<const char*>(
-            sha1(reinterpret_cast<const uint8_t*>(encoded_info.data()),
-                 encoded_info.size()).data()), 20);
-    info_.info_hash     = sha1_hex(
-        reinterpret_cast<const uint8_t*>(encoded_info.data()),
-        encoded_info.size());
+    /* There has to be exactly the number of pieces that the size and the piece length give. */
+    const uint64_t expected = (info_.total_size + info_.piece_length - 1) / info_.piece_length;
+    if (pieces_str.size() / 20 != expected) return false;
+    build_piece_list(pieces_str);
+
+    /* The info-hash is the SHA-1 of the 'info' dictionary exactly as it is in the file (BEP 3). A re-encoding of the
+     * parsed dictionary is the same only when the creator wrote it in canonical form, and a different hash means a
+     * different swarm. */
+    const size_t from = info_it->second->begin;
+    const size_t len  = info_it->second->end - from;
+    const auto*  span = reinterpret_cast<const uint8_t*>(raw.data()) + from;
+    const auto   digest = sha1(span, len);
+    info_.info_hash_raw = std::string(reinterpret_cast<const char*>(digest.data()), digest.size());
+    info_.info_hash     = sha1_hex(span, len);
 
     /* Availability array */
     piece_availability_.assign(info_.pieces.size(), 0);
@@ -387,10 +447,9 @@ void TorrentEngine::build_piece_list(const std::string& pieces_str) {
         Piece p;
         p.index  = static_cast<uint32_t>(i);
         p.offset = static_cast<uint64_t>(i) * info_.piece_length;
-        /* Last piece may be shorter */
-        if (info_.total_size > 0 && i == n - 1)
-            p.length = static_cast<uint32_t>(
-                info_.total_size - p.offset);
+        /* The last piece is what is left of the content */
+        if (i == n - 1)
+            p.length = static_cast<uint32_t>(info_.total_size - p.offset);
         else
             p.length = info_.piece_length;
         std::memcpy(p.sha1_hash.data(), pieces_str.data() + i * 20, 20);

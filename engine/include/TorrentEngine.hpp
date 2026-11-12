@@ -27,17 +27,23 @@ struct BencodeValue {
     std::string str_val;
     BencodeList list_val;
     BencodeDict dict_val;
+    size_t      begin { 0 };   /* where this value starts and ends in the text it was parsed from: the info-hash */
+    size_t      end   { 0 };   /* is the SHA-1 of those bytes as they came, not of a re-encoding of the parse     */
 
+    /* Lists and dictionaries nest at most this deep; real metadata nests under ten levels. */
+    static constexpr unsigned MAX_DEPTH = 64;
+
+    /* Throws std::runtime_error on malformed or too deeply nested input. */
     static std::shared_ptr<BencodeValue> parse(const std::string& data,
-                                                size_t& pos);
+                                                size_t& pos, unsigned depth = 0);
     std::string to_string() const;
 };
 
 /* ── Piece ───────────────────────────────────────────────────────────────── */
 struct Piece {
-    uint32_t index;
-    uint64_t offset;          /* byte offset in the logical file span */
-    uint32_t length;
+    uint32_t index  { 0 };
+    uint64_t offset { 0 };    /* byte offset in the logical file span */
+    uint32_t length { 0 };
     std::array<uint8_t,20> sha1_hash;
     bool     verified { false };
     bool     downloaded { false };
@@ -46,8 +52,8 @@ struct Piece {
 /* ── TorrentFile (within a multi-file torrent) ───────────────────────────── */
 struct TorrentFile {
     std::string path;         /* relative path including subdirectories */
-    uint64_t    length;
-    uint64_t    offset;       /* offset within the logical concatenation */
+    uint64_t    length { 0 };
+    uint64_t    offset { 0 }; /* offset within the logical concatenation */
 };
 
 /* ── TorrentInfo ─────────────────────────────────────────────────────────── */
@@ -55,8 +61,8 @@ struct TorrentInfo {
     std::string              name;
     std::string              info_hash;      /* 20-byte SHA-1, hex-encoded  */
     std::string              info_hash_raw;  /* 20-byte raw bytes           */
-    uint32_t                 piece_length;
-    uint64_t                 total_size;
+    uint32_t                 piece_length { 0 };
+    uint64_t                 total_size   { 0 };
     std::vector<Piece>       pieces;
     std::vector<TorrentFile> files;          /* empty = single-file torrent */
     bool                     is_private { false };
@@ -173,7 +179,7 @@ private:
     std::vector<uint32_t> piece_availability_;
 
     bool parse_torrent(const std::string& raw);
-    bool extract_info(const BencodeValue& root);
+    bool extract_info(const BencodeValue& root, const std::string& raw);
     void build_piece_list(const std::string& pieces_str);
     void compute_file_offsets();
 };

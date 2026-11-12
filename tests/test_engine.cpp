@@ -11,6 +11,8 @@
 #include "../engine/include/PeerDiscovery.hpp"
 
 #include <iostream>
+#include <string>
+#include <vector>
 #include <cstring>
 #include <cassert>
 #include <unistd.h>
@@ -305,6 +307,140 @@ static void test_sha1() {
     EXPECT(hex == "a9993e364706816aba3e25717850c26c9cd0d89d");
 }
 
+/* ── Untrusted input: .torrent files, bencode, file names ────────────────────
+ * Everything a torrent or a header block says is written by whoever runs the server. These tests are the regressions
+ * for what fuzzing under ASan/UBSan and valgrind found in the engine (docs/AUDIT.md, Phase 2). */
+static bool bencode_throws(const std::string& text) {
+    try { (void)TorrentEngine::bencode_parse(text); } catch (const std::exception&) { return true; }
+    return false;
+}
+
+static void test_untrusted_input() {
+    SUITE("Untrusted input — bencode limits, base32, file names, .torrent validation");
+
+    /* nesting is bounded: this used to overflow the stack (a torrent, a tracker reply or a DHT packet of 100 KB) */
+    EXPECT(!bencode_throws(std::string(60, 'l') + std::string(60, 'e')));
+    EXPECT(bencode_throws(std::string(100000, 'l')));
+    EXPECT(bencode_throws(std::string(100000, 'd')));
+    /* a length that wraps when added to the position used to pass the "is it all there" check */
+    EXPECT(bencode_throws("18446744073709551615:abc"));
+    EXPECT(bencode_throws("9223372036854775807:abc"));
+    EXPECT(bencode_throws("99999999999999999999:abc"));
+    /* numbers are digits, with an optional minus: no sign, no spaces, no trailing text */
+    EXPECT(bencode_throws("i5xe"));
+    EXPECT(bencode_throws("i+5e"));
+    EXPECT(bencode_throws("i 5e"));
+    EXPECT(bencode_throws("ie"));
+    EXPECT(bencode_throws("i99999999999999999999e"));
+    EXPECT(bencode_throws("3x:abc"));
+    EXPECT(TorrentEngine::bencode_parse("i-5e")->int_val == -5);
+    EXPECT(TorrentEngine::bencode_parse("3:abc")->str_val == "abc");
+
+    /* base32: the accumulator was a signed int that overflowed after six characters (undefined behaviour) */
+    EXPECT(TorrentEngine::base32_decode("JBSWY3DPEHPK3PXP") == std::string("Hello!\xDE\xAD\xBE\xEF"));
+    EXPECT_EQ(TorrentEngine::base32_decode(std::string(4000, 'A')).size(), size_t(2500));
+
+    /* file names: control characters and the cut in the middle of a UTF-8 sequence */
+    EXPECT(MetadataParser::sanitise_filename("a\nb\x1b[31m\x7f.txt") == "a_b_[31m_.txt");
+    std::string long_name = std::string(254, 'a') + "\xC3\xA9";                  /* 254 bytes + a two-byte letter */
+    EXPECT(MetadataParser::sanitise_filename(long_name) == std::string(254, 'a'));
+    EXPECT(MetadataParser::sanitise_filename("..") == "download");
+    EXPECT(MetadataParser::sanitise_filename("../../etc/passwd") == "_.._etc_passwd");
+    /* a Content-Disposition of 100 KB used to overflow the stack in std::regex */
+    EXPECT(MetadataParser::parse_content_disposition("attachment; filename=" + std::string(200000, 'a')).empty());
+    EXPECT(MetadataParser::parse_content_disposition("attachment; filename=\"a b.zip\"; size=5") == "a b.zip");
+    EXPECT(MetadataParser::parse_content_disposition("attachment; FILENAME = x.bin") == "x.bin");
+    EXPECT(MetadataParser::parse_content_disposition("attachment; filename=\"fallback.txt\"; filename*=UTF-8''real%20name.txt") == "real name.txt");
+    EXPECT(MetadataParser::parse_content_disposition("inline").empty());
+
+    /* .torrent files */
+    auto bstr = [](const std::string& s) { return std::to_string(s.size()) + ":" + s; };
+    auto bint = [](int64_t v) { return "i" + std::to_string(v) + "e"; };
+    const std::string two_pieces(40, 'X'), three_pieces(60, 'X');
+    auto single = [&](const std::string& name, int64_t length, int64_t piece_length, const std::string& pieces) {
+        return "d4:infod" + bstr("length") + bint(length) + bstr("name") + bstr(name) + bstr("piece length") + bint(piece_length) +
+               bstr("pieces") + bstr(pieces) + "ee";
+    };
+    auto multi = [&](const std::vector<std::string>& path) {
+        std::string comps;
+        for (const auto& c : path) comps += bstr(c);
+        return "d4:infod" + bstr("files") + "ld" + bstr("length") + bint(1000) + bstr("path") + "l" + comps + "eee" + bstr("name") + bstr("dir") +
+               bstr("piece length") + bint(500) + bstr("pieces") + bstr(two_pieces) + "ee";
+    };
+    auto loads = [](const std::string& torrent) {
+        TorrentEngine e;
+        return e.load_bytes(std::vector<uint8_t>(torrent.begin(), torrent.end()));
+    };
+
+    EXPECT(loads(single("a.bin", 1000, 500, two_pieces)));
+    EXPECT(loads(multi({"sub", "x.txt"})));
+    /* a torrent must not be able to place a file outside the download directory */
+    EXPECT(!loads(multi({"..", "x.txt"})));
+    EXPECT(!loads(multi({"sub", ".."})));
+    EXPECT(!loads(multi({"/etc/cron.d", "x"})));
+    EXPECT(!loads(multi({"a/../../x"})));
+    EXPECT(!loads(multi({"."})));
+    EXPECT(!loads(multi({""})));
+    EXPECT(!loads(multi({})));
+    EXPECT(!loads(single("a/b", 1000, 500, two_pieces)));
+    EXPECT(!loads(single("..", 1000, 500, two_pieces)));
+    EXPECT(!loads(single("a\nb", 1000, 500, two_pieces)));
+    /* sizes: a piece length of 0 used to divide by zero later, a negative or huge one wrapped */
+    EXPECT(!loads(single("a", 1000, 0, two_pieces)));
+    EXPECT(!loads(single("a", 1000, -500, two_pieces)));
+    EXPECT(!loads(single("a", 1000, int64_t(1) << 40, two_pieces)));
+    EXPECT(!loads(single("a", -1, 500, two_pieces)));
+    EXPECT(!loads(single("a", 0, 500, two_pieces)));
+    EXPECT(!loads(single("a", int64_t(1) << 61, 500, two_pieces)));
+    EXPECT(!loads(single("a", 1000, 500, three_pieces)));              /* the pieces do not match the size */
+    EXPECT(!loads(single("a", 1000, 500, std::string(39, 'X'))));      /* not a whole number of hashes */
+    EXPECT(!loads(single("a", 1000, 500, "")));
+
+    /* the last piece is what is left of the content (it was the full piece length: the total was not yet known) */
+    {
+        TorrentEngine e;
+        const std::string t = single("a.bin", 1100, 500, three_pieces);
+        EXPECT(e.load_bytes(std::vector<uint8_t>(t.begin(), t.end())));
+        EXPECT_EQ(e.info().pieces.size(), size_t(3));
+        EXPECT_EQ(e.info().pieces[0].length, uint32_t(500));
+        EXPECT_EQ(e.info().pieces[2].length, uint32_t(100));
+        EXPECT_EQ(e.info().total_size, uint64_t(1100));
+    }
+
+    /* the info-hash is the SHA-1 of the info dictionary as written, not of a re-encoding of it: here the keys are not in
+     * sorted order, so the two differ. Expected values from Python's hashlib over the same bytes. */
+    {
+        const std::string unsorted_info = "d" + bstr("name") + bstr("test.bin") + bstr("length") + bint(1000) + bstr("piece length") + bint(500) +
+                                          bstr("pieces") + bstr(two_pieces) + "e";
+        const std::string canonical_info = "d" + bstr("length") + bint(1000) + bstr("name") + bstr("test.bin") + bstr("piece length") + bint(500) +
+                                           bstr("pieces") + bstr(two_pieces) + "e";
+        TorrentEngine a, b;
+        const std::string ta = "d4:info" + unsorted_info + "e", tb = "d4:info" + canonical_info + "e";
+        EXPECT(a.load_bytes(std::vector<uint8_t>(ta.begin(), ta.end())));
+        EXPECT(b.load_bytes(std::vector<uint8_t>(tb.begin(), tb.end())));
+        EXPECT(a.info().info_hash == "d2aa287922b0cc3e66cdc9b445240321e9320d4f");
+        EXPECT(b.info().info_hash == "9aaa88407a64e6c8a7858c10306143bf1183ba16");
+        EXPECT_EQ(a.info().info_hash_raw.size(), size_t(20));
+    }
+
+    /* a torrent that is refused leaves nothing of itself, or of the one before it, behind */
+    {
+        TorrentEngine e;
+        const std::string good = single("a.bin", 1000, 500, two_pieces), bad = multi({"..", "x"});
+        EXPECT(e.load_bytes(std::vector<uint8_t>(good.begin(), good.end())));
+        EXPECT(!e.load_bytes(std::vector<uint8_t>(bad.begin(), bad.end())));
+        EXPECT(!e.loaded());
+        EXPECT(e.info().name.empty() && e.info().files.empty() && e.info().pieces.empty());
+    }
+    /* nothing in a fresh engine is left uninitialised (valgrind: the last-piece code read total_size before it was set) */
+    {
+        TorrentEngine e;
+        EXPECT_EQ(e.info().piece_length, uint32_t(0));
+        EXPECT_EQ(e.info().total_size, uint64_t(0));
+        EXPECT(!e.info().is_valid());
+    }
+}
+
 /* ── TorrentEngine — full .torrent construction ──────────────────────────── */
 static void test_torrent_construction() {
     SUITE("TorrentEngine — Synthetic .torrent parse");
@@ -402,6 +538,7 @@ int main() {
     test_magnet();
     test_sha1();
     test_torrent_construction();
+    test_untrusted_input();
     test_peer_discovery();
 
     std::cout << "\n" BOLD CYAN "─────────────────────────────" RESET "\n";

@@ -3,7 +3,6 @@
 #include "../include/MetadataParser.hpp"
 #include <algorithm>
 #include <cctype>
-#include <regex>
 #include <sstream>
 #include <unordered_map>
 
@@ -140,9 +139,11 @@ std::string MetadataParser::sanitise_filename(const std::string& raw) {
     std::string safe;
     safe.reserve(raw.size());
     for (char c : raw) {
-        if (c == '/' || c == '\\' || c == '\0' || c == ':' ||
+        const unsigned char u = static_cast<unsigned char>(c);
+        /* control characters too: a newline or an escape sequence in a name reaches logs, terminals and the UI */
+        if (c == '/' || c == '\\' || c == ':' ||
             c == '*'  || c == '?' || c == '"'  || c == '<' ||
-            c == '>'  || c == '|')
+            c == '>'  || c == '|' || u < 0x20 || u == 0x7f)
             safe += '_';
         else
             safe += c;
@@ -151,23 +152,50 @@ std::string MetadataParser::sanitise_filename(const std::string& raw) {
     size_t start = safe.find_first_not_of('.');
     if (start == std::string::npos) return "download";
     safe = safe.substr(start);
-    /* Truncate at 255 chars (common FS limit) */
-    if (safe.size() > 255) safe.resize(255);
+    /* Truncate at 255 bytes (the usual file-system limit), not in the middle of a UTF-8 sequence */
+    if (safe.size() > 255) {
+        size_t cut = 255;
+        while (cut > 0 && (static_cast<unsigned char>(safe[cut]) & 0xC0) == 0x80) --cut;
+        safe.resize(cut);
+    }
     return safe.empty() ? "download" : safe;
 }
 
+/* The value of the parameter `name` ("filename" or "filename*") in a Content-Disposition value, up to the next ';', or
+ * "" if it is absent or empty. Names match without regard to case. This was a pair of std::regex objects, built on
+ * every call; libstdc++'s regex matcher recurses once per character, so a header value of 100 KB or so overflowed the
+ * stack and took the process down. A scan cannot. */
+static std::string disposition_parameter(const std::string& v, const std::string& lower, const std::string& name) {
+    for (size_t at = lower.find(name); at != std::string::npos; at = lower.find(name, at + 1)) {
+        size_t i = at + name.size();
+        if (name == "filename" && i < lower.size() && lower[i] == '*') continue;    /* the extended form is another parameter */
+        while (i < lower.size() && std::isspace(static_cast<unsigned char>(lower[i]))) ++i;
+        if (i >= lower.size() || lower[i] != '=') continue;
+        ++i;
+        while (i < v.size() && std::isspace(static_cast<unsigned char>(v[i]))) ++i;
+        size_t end = v.find(';', i);
+        std::string val = v.substr(i, end == std::string::npos ? std::string::npos : end - i);
+        if (!val.empty()) return val;
+    }
+    return {};
+}
+
 std::string MetadataParser::parse_content_disposition(const std::string& value) {
+    /* A file name is at most 255 bytes, 765 percent-encoded; no honest header value comes anywhere near this. */
+    if (value.size() > 8192) return {};
+    const std::string lower = to_lower(value);
+
     /* Try RFC 5987 extended notation first: filename*=UTF-8''name */
-    std::regex rfc5987(R"(filename\*\s*=\s*(?:[Uu][Tt][Ff]-8''|)([^;]+))",
-                        std::regex::icase);
-    std::smatch m;
-    if (std::regex_search(value, m, rfc5987))
-        return sanitise_filename(url_decode(trim(m[1].str())));
+    std::string ext = disposition_parameter(value, lower, "filename*");
+    if (!ext.empty()) {
+        std::string t = trim(ext);
+        if (t.size() > 7 && to_lower(t.substr(0, 7)) == "utf-8''") t.erase(0, 7);
+        return sanitise_filename(url_decode(t.empty() ? trim(ext) : t));
+    }
 
     /* Fall back to filename="..." */
-    std::regex basic(R"(filename\s*=\s*([^;]+))", std::regex::icase);
-    if (std::regex_search(value, m, basic))
-        return sanitise_filename(trim(m[1].str()));
+    std::string basic = disposition_parameter(value, lower, "filename");
+    if (!basic.empty()) return sanitise_filename(trim(basic));
 
     return {};
 }
