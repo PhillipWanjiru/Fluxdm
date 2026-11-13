@@ -491,6 +491,20 @@ public class ApiSecurityTest {
             T.eq(Verdict.BAD_HOST, g.check(host, null, tok, true), "Host " + (host == null ? "(absent)" : "\"" + host.replace("\r", "\\r").replace("\n", "\\n") + "\"") + " is refused");
         }
 
+        // Only spaces and tabs may surround a Host value, and only printable ASCII may be in it. Java's strip() and
+        // toLowerCase() would otherwise "repair" other text into a name on the list.
+        T.eq(Verdict.ALLOWED, g.check("\tlocalhost:7171\t", null, tok, true), "tabs around a Host value are allowed");
+        for (String host : new String[] {"\u2003localhost", "localhost\u2003", "\u3000127.0.0.1:7171", "localhost\u2028",
+                                         "\u001clocalhost", "\u000blocalhost", "localhost\u0000", "local\u200Bhost",
+                                         "locaL\u0131host", "\u212A", "\u00A0localhost", "[::1]\u2003:7171"}) {
+            T.eq(Verdict.BAD_HOST, g.check(host, null, tok, true), "Host \"" + ApiGuard.printable(host) + "\" (not plain ASCII) is refused");
+        }
+        ApiGuard named = guard(true, "desktop", ApiGuard.DEFAULT_ORIGINS, fresh("lookalike").resolve("api-token"));
+        String namedTok = "Bearer " + tokenOf(named);
+        T.eq(Verdict.ALLOWED,  named.check("DeskTop:7171", null, namedTok, true), "a configured name matches whatever its case");
+        T.eq(Verdict.BAD_HOST, named.check("des\u212Atop:7171", null, namedTok, true),
+             "the Kelvin sign is not a k: lower-casing must not turn another name into the configured one");
+
         for (String origin : new String[] {null, "http://localhost:3000", "app://-"}) {
             T.eq(Verdict.ALLOWED, g.check(ok, origin, tok, true), "Origin " + origin + " is allowed");
         }

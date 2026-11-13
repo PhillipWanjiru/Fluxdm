@@ -106,6 +106,10 @@ contain incompatible changes; they are listed under **Changed** or **Removed** a
   without its `user:password@` part (a file from an older version, which has it, still matches). The unit suite
   grew from 272 to 343 checks, 25 of which fail on the old code and one of which hangs it; the behaviour suite
   checks the mode and the password across a real restart.
+- **The `Host` check compares exactly what was sent.** Unicode spaces around a `Host` value were removed, and the
+  Kelvin sign (U+212A) was read as a `k`, before the value was looked up. A real request is unlikely to carry
+  such characters, and no way to use this was found, but only printable ASCII with spaces or tabs around it is
+  accepted now.
 
 ## [0.1.0] - 2026-10-28
 

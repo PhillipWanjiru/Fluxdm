@@ -130,11 +130,18 @@ public class ApiGuard {
 
     /** The host name in a Host header value, lower-case and without the port; null if the value is not a plausible
      *  one. Anything but "name" or "name:digits" is refused, so "evil.example:80@127.0.0.1" never reduces to a
-     *  name on the list. */
+     *  name on the list. Only spaces and tabs may surround the value and only printable ASCII may be in it: Java's
+     *  strip() also removes Unicode spaces and some control characters, and toLowerCase() turns the Kelvin sign
+     *  (U+212A) into a "k", and either would let a Host that is not on the list pass for one that is. */
     static String hostName(String header) {
         if (header == null) return null;
-        String h = header.strip().toLowerCase(Locale.ROOT);
+        String h = trimSpaces(header);
         if (h.isEmpty()) return null;
+        for (int i = 0; i < h.length(); i++) {
+            char c = h.charAt(i);
+            if (c <= 0x20 || c >= 0x7f) return null;
+        }
+        h = h.toLowerCase(Locale.ROOT);                            // ASCII in, ASCII out
         int end;
         if (h.charAt(0) == '[') {                                  // an IPv6 literal: [::1] or [::1]:7171
             int close = h.indexOf(']');
@@ -145,6 +152,14 @@ public class ApiGuard {
             end = colon < 0 ? h.length() : colon;
         }
         return end < h.length() && !PORT.matcher(h.substring(end)).matches() ? null : h.substring(0, end);
+    }
+
+    /** `s` without the spaces and tabs at either end, the optional whitespace HTTP allows around a field value. */
+    private static String trimSpaces(String s) {
+        int from = 0, to = s.length();
+        while (from < to && (s.charAt(from) == ' ' || s.charAt(from) == '\t')) from++;
+        while (to > from && (s.charAt(to - 1) == ' ' || s.charAt(to - 1) == '\t')) to--;
+        return s.substring(from, to);
     }
 
     /** The credential in an "Authorization: Bearer <credential>" value (the scheme name is case-insensitive),
