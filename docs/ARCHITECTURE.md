@@ -232,12 +232,19 @@ Per-download state lives next to the output file in `<file>.fluxpart`:
 
 - **Atomic.** Saved to `<file>.fluxpart.tmp`, then `rename(2)`d over the old file, so a crash
   leaves either the previous checkpoint or the new one, never a torn file.
+- **Private.** The file sits in a folder that other accounts may read or write, so it is created mode
+  `0600` (whatever the umask), and the temporary file is created with `O_EXCL | O_NOFOLLOW` after any
+  leftover of a crash was removed: a link planted at that name is not followed, and what it points to is
+  not overwritten. Loading refuses a link, a FIFO, a device or a folder in its place without waiting on it.
+- **No password.** The URL is stored without its `user:password@` part (`flux_resume_redact_url`), and a
+  stored URL is compared with the current one in that form, so a file written before this change, which
+  kept the password, still matches, and so does a resume after the password was corrected.
 - **Validator.** An FNV-1a hash of `Last-Modified` (else a strong `ETag`), mixed with the file size.
   A resume is refused when it no longer matches: the remote file changed and the bytes on disk would
   be a splice of two versions.
 - **What is checked before reuse.** The server supports ranges; the size matches; the validator
-  matches; the URL matches (or differs only in its query *and* the validators vouch for it, which
-  covers refreshed signed URLs); the segment table is contiguous, covers `[0, total)` exactly, and no
+  matches; the URL matches, user name and password aside (or differs only in its query *and* the
+  validators vouch for it, which covers refreshed signed URLs); the segment table is contiguous, covers `[0, total)` exactly, and no
   segment claims more than its range; the partial file exists, is a regular file, and has the right
   size. Anything else starts the download over, and the log says why.
 - **Cost of a crash.** At most `FLUX_RESUME_SAVE_MS` (3 s) of progress per segment is repeated. Because

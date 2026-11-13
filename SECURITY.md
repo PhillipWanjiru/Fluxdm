@@ -63,6 +63,10 @@ time to fix the problem before you disclose it.
   truncated and oversized input under AddressSanitizer and UndefinedBehaviorSanitizer.
 - **A resume is refused when the remote file changed** (validator and size mismatch), so a partial
   file is never spliced with a different version of the file.
+- **The resume file is private and holds no password.** `<download>.fluxpart` is created mode `0600`, is
+  never opened through a link (a link planted at its temporary name in a shared folder does not make the
+  core overwrite the file it points to), is refused when it is a FIFO or a folder, and keeps the URL
+  without its `user:password@` part.
 - **A file that fails checksum verification is deleted**, not left at its final name.
 - **Credentials go only where they were meant to.** Basic-authentication credentials in a URL are
   sent to that URL's origin and are not carried over a redirect to another host, another port or a

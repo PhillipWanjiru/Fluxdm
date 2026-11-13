@@ -98,6 +98,14 @@ contain incompatible changes; they are listed under **Changed** or **Removed** a
   it load code only from the app and talk only to the daemon (`127.0.0.1:7171`, HTTP and WebSocket); it cannot
   navigate away, open windows or be granted a permission; and only its own top-level page can ask the main process
   for the API token. See [SECURITY.md](SECURITY.md).
+- **The resume file `<download>.fluxpart` is private and holds no password.** It was created with the default
+  permissions (`0644` on most systems), and written through whatever its temporary name pointed to: a link
+  planted at `<download>.fluxpart.tmp` in a shared folder made the core overwrite the file the link pointed to, and
+  a FIFO in place of the file made the download wait for ever. It also kept the URL as given, password included.
+  It is now mode `0600`, never opened through a link, refused if it is a FIFO or a folder, and the URL is stored
+  without its `user:password@` part (a file from an older version, which has it, still matches). The unit suite
+  grew from 272 to 343 checks, 25 of which fail on the old code and one of which hangs it; the behaviour suite
+  checks the mode and the password across a real restart.
 
 ## [0.1.0] - 2026-10-28
 

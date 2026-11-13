@@ -21,6 +21,7 @@ import resource
 import shutil
 import signal
 import socket
+import stat
 import struct
 import subprocess
 import sys
@@ -1046,9 +1047,11 @@ def test_duplicates_and_ids():
 
 
 # ═══ Persistence: shutdown, crash, resume ═════════════════════════════════════
-def _resume_scenario(label, how, change_remote=False, url_query=None):
+def _resume_scenario(label, how, change_remote=False, url_query=None, userinfo=None):
     """Start a held download, stop the core by `how` ('shutdown' | 'sigterm' | 'sigkill'),
-    restart it on the same socket and finish the download."""
+    restart it on the same socket and finish the download. `userinfo` ("user:password", or a pair: before and after
+    the restart) puts credentials in the URL."""
+    creds = userinfo if isinstance(userinfo, tuple) else (userinfo, userinfo)
     size = 12 << 20
     name = f"rs_{label}.bin"
     mkfile(name, size)
@@ -1058,7 +1061,7 @@ def _resume_scenario(label, how, change_remote=False, url_query=None):
     core = fresh_core()
     c = core.connect()
     dl, dest = nid(), outpath("resume")
-    url = site.url(path) + (f"?{url_query[0]}" if url_query else "")
+    url = site.url(path, userinfo=creds[0]) + (f"?{url_query[0]}" if url_query else "")
     c.start_ok(dl, url, dest, segments=4)
     expect(c.wait_done(dl, 3 << 20, 30), f"[{label}] 4 MiB received while the server holds the rest")
     done_at_stop = c.dl(dl).max_done
@@ -1073,6 +1076,13 @@ def _resume_scenario(label, how, change_remote=False, url_query=None):
     fp = Path(str(dest) + ".fluxpart")
     expect(fp.exists(), f"[{label}] resume file survives")
     expect(dest.exists(), f"[{label}] partial data file survives")
+    mode = stat.S_IMODE(fp.stat().st_mode)
+    expect(mode == 0o600, f"[{label}] resume file is private (mode {mode:o})")
+    if creds[0]:
+        raw = fp.read_bytes()
+        secret = creds[0].split(":", 1)[-1]
+        expect(creds[0].encode() not in raw and secret.encode() not in raw,
+               f"[{label}] resume file holds neither user name nor password")
 
     if change_remote:
         p = SRV / name
@@ -1084,8 +1094,7 @@ def _resume_scenario(label, how, change_remote=False, url_query=None):
     expect(core.start(clean=(how != "sigkill")), f"[{label}] core restarts" +
            (" over the stale socket file" if how == "sigkill" else ""), core.log_text())
     c2 = core.connect()
-    if url_query:
-        url = site.url(path) + f"?{url_query[1]}"
+    url = site.url(path, userinfo=creds[1]) + (f"?{url_query[1]}" if url_query else "")
     typ, pl = c2.start(dl, url, dest, segments=4)
     expect(typ == RSP_OK, f"[{label}] same download started again", parse_error(pl) if typ == RSP_ERROR else None)
     res = c2.wait_terminal(dl, 90)
@@ -1120,6 +1129,12 @@ def test_resume_validation():
     info("Resume validation")
     _resume_scenario("changed", "shutdown", change_remote=True)
     _resume_scenario("token", "shutdown", url_query=("token=1", "token=2"))
+
+
+def test_resume_credentials():
+    info("Resume: a URL with a user name and password")
+    _resume_scenario("creds", "shutdown", userinfo="alice:hunter2")
+    _resume_scenario("newpass", "shutdown", userinfo=("alice:hunter2", "alice:changed"))
 
 
 def test_second_instance():
@@ -1516,7 +1531,7 @@ TESTS = [
     test_rate_limit_patience, test_rate_limit_queue, test_disk_errors,
     test_pause_resume, test_pause_resume_storm, test_cancel_cleanup, test_interruptible_probe,
     test_bandwidth_limits, test_duplicates_and_ids, test_resume_after_shutdown, test_resume_after_sigterm,
-    test_resume_after_sigkill, test_resume_validation, test_second_instance, test_concurrent_downloads,
+    test_resume_after_sigkill, test_resume_validation, test_resume_credentials, test_second_instance, test_concurrent_downloads,
     test_event_broadcast, test_ipc_robustness, test_slow_reader, test_client_disconnect_midway,
     test_https, test_throughput,
 ]

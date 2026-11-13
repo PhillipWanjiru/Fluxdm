@@ -17,6 +17,8 @@
 #include <time.h>
 #include <assert.h>
 #include <errno.h>
+#include <fcntl.h>
+#include <sys/stat.h>
 
 /* Pull in the modules under test directly via source inclusion.
  * This avoids needing a shared library and keeps the test self-contained. */
@@ -325,6 +327,195 @@ static void test_resume(void) {
     char ppath[512];
     flux_resume_path("/downloads/video.mp4", ppath, sizeof(ppath));
     EXPECT_STR(ppath, "/downloads/video.mp4.fluxpart");
+}
+
+/* ── Suite 5b: a URL without its password ───────────────────────────────── */
+static void test_resume_redact_url(void) {
+    SUITE("resume.c — a URL without its user name and password");
+
+    static const struct { const char *in, *out; } cases[] = {
+        { "http://example.com/f.bin",                "http://example.com/f.bin" },
+        { "http://user:hunter2@example.com/f.bin",   "http://example.com/f.bin" },
+        { "http://user@example.com/f.bin",           "http://example.com/f.bin" },
+        { "https://u:p%40ss@host:8443/a/b?x=1#frag", "https://host:8443/a/b?x=1#frag" },
+        { "http://a@b@c/x",                          "http://c/x" },               /* the LAST '@' ends the user info */
+        { "http://u:p@[::1]:80/x",                   "http://[::1]:80/x" },
+        { "http://[::1]:80/x",                       "http://[::1]:80/x" },
+        { "http://u:p@host",                         "http://host" },
+        { "http://@host/f",                          "http://host/f" },
+        { "http://host/dir@name/f",                  "http://host/dir@name/f" },   /* an '@' after the authority is not */
+        { "http://host/f?mail=a@b",                  "http://host/f?mail=a@b" },
+        { "http://host?mail=a@b",                    "http://host?mail=a@b" },
+        { "http://host#a@b",                         "http://host#a@b" },
+        { "not a url@x",                             "not a url@x" },
+        { "",                                        "" },
+    };
+    for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
+        char out[256], again[256];
+        size_t n = flux_resume_redact_url(cases[i].in, out, sizeof(out));
+        EXPECT_STR(out, cases[i].out);
+        flux_resume_redact_url(out, again, sizeof(again));
+        EXPECT(n == strlen(cases[i].out) && strcmp(again, out) == 0);              /* length, and doing it twice */
+    }
+
+    char small[8];
+    size_t n = flux_resume_redact_url("http://user:pw@example.com/long/path", small, sizeof(small));
+    EXPECT_EQ(n, 7);
+    EXPECT_STR(small, "http://");                                                  /* cut short, and still a string */
+
+    char guard[4] = { 'x', 'x', 'x', 'x' };
+    EXPECT_EQ(flux_resume_redact_url("http://a@b/", guard, 0), 0);
+    EXPECT(guard[0] == 'x');                                                       /* no room: nothing written */
+}
+
+/* ── Suite 5c: the resume file as a target ───────────────────────────────── */
+/* The resume file sits next to the download, in a folder other accounts may be able to read or write, and it
+ * names the URL. These tests set up what such a neighbour could. */
+static void put(const char *path, const char *text) {
+    FILE *f = fopen(path, "wb");
+    if (f) { fputs(text, f); fclose(f); }
+}
+
+static int slurp(const char *path, char *out, size_t cap) {       /* the whole file, NUL-terminated; -1 if unreadable */
+    FILE *f = fopen(path, "rb");
+    if (!f) return -1;
+    size_t n = fread(out, 1, cap - 1, f);
+    fclose(f);
+    out[n] = '\0';
+    return (int)n;
+}
+
+static int has_text(const char *buf, size_t n, const char *needle) {
+    size_t m = strlen(needle);
+    for (size_t i = 0; i + m <= n; i++) if (memcmp(buf + i, needle, m) == 0) return 1;
+    return 0;
+}
+
+static int perms_of(const char *path) {                           /* permission bits, without following a link */
+    struct stat sb;
+    return lstat(path, &sb) == 0 ? (int)(sb.st_mode & 07777) : -1;
+}
+
+static int is_regular(const char *path) {
+    struct stat sb;
+    return lstat(path, &sb) == 0 && S_ISREG(sb.st_mode);
+}
+
+static void make_record(flux_resume_t *r, const char *url) {
+    memset(r, 0, sizeof(*r));
+    r->hdr.magic        = FLUX_RESUME_MAGIC;
+    r->hdr.version      = FLUX_RESUME_VER;
+    r->hdr.download_id  = 7;
+    r->hdr.num_segments = 1;
+    r->hdr.total_size   = 1000;
+    r->segs[0].range_end = 999;
+    r->segs[0].written   = 100;
+    snprintf(r->url,  sizeof(r->url),  "%s", url);
+    snprintf(r->path, sizeof(r->path), "/data/f.bin");
+}
+
+static void test_resume_files(void) {
+    SUITE("resume.c — a file other accounts can see, in a folder they may write to");
+
+    char dir[] = "/tmp/fluxdm_resume_XXXXXX";
+    if (!mkdtemp(dir)) { printf("  %s✘%s  mkdtemp failed\n", RED, RESET); g_fail++; return; }
+    mode_t old_umask = umask(0);                       /* the mode we ask for must hold whatever the umask says */
+
+    char part[256], tmp[272], victim[256], gone[256], real[256], via[256], fifo[256], folder[256];
+    snprintf(part,   sizeof(part),   "%s/dl.fluxpart", dir);
+    snprintf(tmp,    sizeof(tmp),    "%s.tmp", part);
+    snprintf(victim, sizeof(victim), "%s/victim", dir);
+    snprintf(gone,   sizeof(gone),   "%s/nowhere", dir);
+    snprintf(real,   sizeof(real),   "%s/real.fluxpart", dir);
+    snprintf(via,    sizeof(via),    "%s/via.fluxpart", dir);
+    snprintf(fifo,   sizeof(fifo),   "%s/fifo.fluxpart", dir);
+    snprintf(folder, sizeof(folder), "%s/folder.fluxpart", dir);
+
+    char buf[16384];
+    flux_resume_t r, back;
+
+    /* The password stays out of the file, and so does the user name; the rest of the URL is kept. */
+    make_record(&r, "http://alice:hunter2@example.com/big.iso?sig=abc");
+    EXPECT_EQ(flux_resume_save(&r, part), 0);
+    int n = slurp(part, buf, sizeof(buf));
+    EXPECT(n > 0);
+    EXPECT(!has_text(buf, (size_t)n, "hunter2"));
+    EXPECT(!has_text(buf, (size_t)n, "alice"));
+    EXPECT(has_text(buf, (size_t)n, "http://example.com/big.iso?sig=abc"));
+    EXPECT_EQ(flux_resume_load(&back, part), 0);
+    EXPECT_STR(back.url, "http://example.com/big.iso?sig=abc");
+    EXPECT_STR(r.url,    "http://alice:hunter2@example.com/big.iso?sig=abc");      /* the caller's record is not changed */
+
+    /* Only its owner can read it, whatever the umask. */
+    EXPECT_EQ(perms_of(part), 0600);
+    unlink(part);
+    put(part, "left by an older version");
+    chmod(part, 0644);
+    EXPECT_EQ(flux_resume_save(&r, part), 0);
+    EXPECT_EQ(perms_of(part), 0600);                                                /* an open one is closed again */
+
+    /* A link where the temporary file goes must not be followed: its target is left alone, and the save works. */
+    put(victim, "VICTIM");
+    unlink(tmp);
+    EXPECT_EQ(symlink(victim, tmp), 0);
+    EXPECT_EQ(flux_resume_save(&r, part), 0);
+    slurp(victim, buf, sizeof(buf));
+    EXPECT_STR(buf, "VICTIM");
+    EXPECT(is_regular(part));
+    unlink(tmp);
+
+    unlink(gone);
+    EXPECT_EQ(symlink(gone, tmp), 0);                                               /* a link to nothing: not created */
+    EXPECT_EQ(flux_resume_save(&r, part), 0);
+    EXPECT_EQ(access(gone, F_OK), -1);
+    unlink(tmp);
+
+    /* A temporary file left by a crash is replaced; a folder in its way is an error, not a hang. */
+    put(tmp, "left by a crash");
+    EXPECT_EQ(flux_resume_save(&r, part), 0);
+    EXPECT_EQ(access(tmp, F_OK), -1);                                               /* renamed into place */
+    EXPECT_EQ(mkdir(tmp, 0700), 0);
+    EXPECT_EQ(flux_resume_save(&r, part), -1);
+    EXPECT_EQ(flux_last_error(), FLUX_ERR_SYS);
+    rmdir(tmp);
+
+    /* A link where the resume file goes is replaced, not written through. */
+    unlink(part);
+    put(victim, "VICTIM");
+    EXPECT_EQ(symlink(victim, part), 0);
+    EXPECT_EQ(flux_resume_save(&r, part), 0);
+    slurp(victim, buf, sizeof(buf));
+    EXPECT_STR(buf, "VICTIM");
+    EXPECT(is_regular(part));
+
+    /* Loading: a link, a FIFO and a folder are not resume files. A FIFO nobody writes to would block an ordinary
+     * open for ever, so a watchdog ends the test if it does. */
+    EXPECT_EQ(flux_resume_save(&r, real), 0);
+    EXPECT_EQ(flux_resume_load(&back, real), 0);
+    EXPECT_EQ(symlink(real, via), 0);
+    EXPECT_EQ(flux_resume_load(&back, via), -1);
+    EXPECT_EQ((int)back.hdr.magic, 0);                                              /* and nothing of it was kept */
+    EXPECT_EQ(mkfifo(fifo, 0600), 0);
+    printf("  %s·%s  (a 10 s watchdog ends the run if loading a FIFO blocks)\n", DIM, RESET);
+    alarm(10);
+    EXPECT_EQ(flux_resume_load(&back, fifo), -1);
+    alarm(0);
+    EXPECT_EQ(mkdir(folder, 0700), 0);
+    EXPECT_EQ(flux_resume_load(&back, folder), -1);
+
+    /* A path too long for the temporary name is refused, not cut short. */
+    char *far = malloc(5000);
+    if (far) {
+        memset(far, 'a', 4999);
+        far[0] = '/';
+        far[4999] = '\0';
+        EXPECT_EQ(flux_resume_save(&r, far), -1);
+        free(far);
+    }
+
+    rmdir(folder); unlink(fifo); unlink(via); unlink(real); unlink(part); unlink(tmp); unlink(victim);
+    rmdir(dir);
+    umask(old_umask);
 }
 
 /* ── Suite 6: HTTP URL parser ─────────────────────────────────────────────── */
@@ -945,6 +1136,8 @@ int main(void) {
     test_bandwidth();
     test_checksum();
     test_resume();
+    test_resume_redact_url();
+    test_resume_files();
     test_http_url_parse();
     test_http_headers();
     test_hostgate_slots();
