@@ -30,6 +30,7 @@ bash tests/run_all.sh --no-core    # unit tests only (seconds)
 bash tests/run_daemon_tests.sh     # Java suites (add --no-e2e to skip the real-core suite, --no-maven to skip the Maven step)
 bash tests/smoke_api.sh            # the built daemon's API defences over real HTTP and WebSocket (needs the jar and the core built)
 bash tests/run_engine_tests.sh     # C++ engine layer
+bash tests/run_extension_tests.sh  # the browser extension: its background script and its native-messaging host
 
 (cd ui && npm ci && npm run lint && npm test -- --watchAll=false && npm run test:electron && npm run build)   # the desktop UI
 
@@ -53,6 +54,7 @@ test starts its **own** core on a private socket, so a daemon or core you are ru
 | **Daemon** | `bash tests/run_daemon_tests.sh` | JDK 21 (Maven optional) | The Java services against a scripted fake core, and against the real core. See below. |
 | **API smoke** | `bash tests/smoke_api.sh` | JDK 21, curl, python3, the built jar and core | The real daemon, started in a throw-away home directory, refuses the wrong Host, the wrong Origin and a missing or wrong token over real HTTP and WebSocket. See below. |
 | **Engine** | `bash tests/run_engine_tests.sh` | g++, `libssl-dev` | The C++ engine layer: segment manager, adaptive tuner, buffer manager, bencode and `.torrent` metadata parsing, magnet links, SHA-1, peer discovery. Compiles directly with `g++`; no CMake needed. |
+| **Extension** | `bash tests/run_extension_tests.sh` | Node.js 18+, python3 | The browser extension: its background script against a stand-in for the `chrome.*` APIs (the browser's own download is cancelled only after FluxDM accepted it; a missing, failing or silent host, or any other reply, leaves it alone; private windows are never offered; the manifest asks only for what the code uses), and its native-messaging host as a real process over Chrome's framing (bad JSON, falsy and non-object messages, oversized and truncated frames). |
 | **UI** | `npm run lint`, `npm test`, `npm run test:electron`, `npm run build` in `ui/` | Node.js 20+ | The desktop UI's model, store and components with Jest, and the Electron shell's rules with `node --test`. See [The desktop UI](#the-desktop-ui). |
 | **Capture design** | `python3 tests/capture_model_check.py` | python3 | The formulas of [VIDEO_CAPTURE.md](VIDEO_CAPTURE.md) (the offer threshold, the classification of parameters, range algebra, the HLS and DASH rules, the connection model, scheduling bounds, expiry, route order) against brute force, exhaustive search or simulation, and the numbers of every worked example. See [The video-capture design](#the-video-capture-design). |
 
@@ -292,6 +294,7 @@ Ubuntu runner:
 | **daemon** | `mvn package` (compiles the daemon against real Spring and runs the build), the Java suites including the end-to-end suite against the real core, and the API smoke test against the jar that was just built |
 | **engine** | The C++ engine build and its tests |
 | **ui** | `npm ci` (no Electron binary), lint, the Jest suites, the Electron shell tests and the production build |
+| **extension** | `tests/run_extension_tests.sh`: the background script under `node --test`, the native host under `unittest` |
 
 The commands in the workflow are the same ones documented above; run them locally to reproduce a CI
 failure.

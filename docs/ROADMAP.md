@@ -48,9 +48,10 @@ In rough order. Each item says what it depends on, so the order is not arbitrary
 3. **Request headers in `START`.** Cookies, `Referer` and `User-Agent` are what make a browser
    hand-off work for downloads behind a login. Today the protocol has no place for them. Needs a
    protocol extension and daemon support first, then:
-4. **Browser-extension hand-off, and video capture.** Today the extension cancels the browser's download
-   and nothing receives the URL: the native-messaging host only acknowledges messages. Pass URL and headers
-   to the daemon through the host (with the API token, which the host can read from `~/.fluxdm/api-token`),
+4. **Browser-extension hand-off, and video capture.** Today the extension offers each download to the
+   native-messaging host and cancels the browser's own copy only if the host answers `accepted`; the host cannot
+   pass a download on yet and says so, so the browser keeps every download and the extension does nothing. Pass
+   URL and headers to the daemon through the host (with the API token, which the host can read from `~/.fluxdm/api-token`),
    and show progress in the popup. The same hand-off carries **the media a page plays**, which is how FluxDM
    will download videos: not with an extractor such as yt-dlp, which has to follow every site's player, but
    the way IDM's FAQ describes its own extension, which "examines all sent and received data from websites to

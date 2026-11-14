@@ -140,8 +140,9 @@ Chrome's `webRequest` API is the observation point. Its reference
   a stream that needs one is served by capture by playback ([section 10](#10-capture-by-playback)), which
   copies what the player was given however the player obtained it.
 
-The existing extension skeleton declares the permissions `declarativeNetRequest`, `downloads`, `storage`
-and `nativeMessaging`, and the host permission `<all_urls>`. Capture adds `webRequest`.
+The extension skeleton declares only the permissions it uses, `downloads` and `nativeMessaging`, and no host
+permission (it declared `declarativeNetRequest`, `storage` and `<all_urls>` while using none of them). Capture
+adds `webRequest` and the host permissions it needs, and nothing more.
 
 **What the extension cannot see: response bodies.** `webRequest` gives headers and metadata, not content.
 So a manifest is recognised by its address and `Content-Type`, and its text is fetched again by FluxDM with

@@ -179,3 +179,14 @@ jobs:
       # CI=true also makes the build treat lint warnings as errors.
       - name: Production build
         run: npm run build --prefix ui
+
+  # No toolchain to install: the runner's Node.js and Python are enough.
+  extension:
+    name: extension
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Background script and native-messaging host
+        run: bash tests/run_extension_tests.sh

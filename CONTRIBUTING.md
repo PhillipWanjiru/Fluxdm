@@ -120,6 +120,7 @@ A change is not finished until its tests are. See [docs/TESTING.md](docs/TESTING
   bash tests/run_daemon_tests.sh     # Java (add --no-maven if you have no network)
   bash tests/smoke_api.sh            # the built daemon's API defences; needs `make -C core` and `mvn -f daemon/pom.xml -DskipTests package`
   bash tests/run_engine_tests.sh     # C++ engine layer
+  bash tests/run_extension_tests.sh  # the browser extension (Node.js 18+ and Python 3.10+)
   bash tests/run_ui_tests.sh         # the UI: lint, Jest, the Electron shell's tests, the production build (Node.js 20+)
   python3 tests/capture_model_check.py   # the formulas of docs/VIDEO_CAPTURE.md (about a second)
   ```

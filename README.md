@@ -96,7 +96,7 @@ specified in [docs/IPC_PROTOCOL.md](docs/IPC_PROTOCOL.md).
 | IPC protocol | [`ipc/`](ipc) | C headers | **Stable**, protocol version 1. |
 | Daemon | [`daemon/`](daemon) | Java 21, Spring Boot 3.2 | **Working.** REST, STOMP, SQLite, queue, recovery. Tested with a harness; `mvn package` builds it. |
 | Engine layer | [`engine/`](engine) | C++17 | **Library, not wired in.** Segment tuning, buffers and BitTorrent building blocks; built and unit-tested standalone. |
-| Browser extension | [`extension/`](extension) | JavaScript (Manifest V3) | **Skeleton.** Cancels a browser download and announces it, but nothing receives the announcement yet: the hand-off to the daemon is a stub. Do not load it for everyday browsing. Video capture is [designed](docs/VIDEO_CAPTURE.md), not built. |
+| Browser extension | [`extension/`](extension) | JavaScript (Manifest V3) | **Skeleton.** Offers each browser download to a native-messaging host and cancels the browser's own copy only if the host accepts it; the host cannot pass anything on yet, so the extension changes nothing and loading it is safe. Video capture is [designed](docs/VIDEO_CAPTURE.md), not built. |
 | Desktop UI | [`ui/`](ui) | React, Redux, Electron | **Working.** Follows the daemon live; add, pause, resume, retry, remove; scheduler; global speed limit; daemon health. Tested with Jest and in a browser, and run by hand in Electron against the real daemon; not yet run against it in CI. See [Run the desktop UI](#run-the-desktop-ui). |
 
 ## Getting started
@@ -244,6 +244,7 @@ bash tests/run_all.sh            # C unit + integration + behaviour suites (seve
 bash tests/run_daemon_tests.sh   # Java suites against a fake core and the real core (--no-maven to skip the Maven step)
 bash tests/smoke_api.sh          # the built daemon's API defences over real HTTP and WebSocket (needs the jar and core built)
 bash tests/run_engine_tests.sh   # C++ engine layer
+bash tests/run_extension_tests.sh # the browser extension
 ```
 
 Details, what each suite proves and how to run the sanitizer builds are in

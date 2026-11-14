@@ -80,6 +80,18 @@ contain incompatible changes; they are listed under **Changed** or **Removed** a
   The parser now limits nesting, checks every length before it uses it, accepts only plain names as path
   components, and hashes the bytes it was given. `tests/test_engine.cpp` gained 63 checks; against the old
   code they crash the process, and 31 of the others fail.
+- **The browser extension no longer loses downloads.** It cancelled every download the browser started and handed it
+  to nothing: its native-messaging host answered `ok` to every message, and nobody was listening to the extension's
+  own announcement. It now offers each download to the host and cancels the browser's copy only when the host
+  answers `accepted`; no host, a crashing, silent or failing host, or any other reply leaves the download with the
+  browser. Downloads from private windows are never offered. The host does not answer `accepted` until it can
+  pass a download on (not built yet), validates what it is sent, answers bad JSON and messages that are not objects
+  instead of exiting (it quit on `{}`, `[]` and `0`), refuses frames over 64 KB instead of reading the length it was
+  told, and is executable. The manifest asks only for `downloads` and `nativeMessaging`: `declarativeNetRequest`,
+  `storage` and access to every site were unused, and an empty script was injected into every page. The unused
+  `native_bridge.js` is gone. New: `tests/run_extension_tests.sh` (13 Node tests with a stand-in for the browser's
+  API, 17 Python tests over real pipes) and an `extension` job in CI. The old script fails all 5 tests that can
+  run against it, and the old host 13 of the 17.
 
 ### Security
 
