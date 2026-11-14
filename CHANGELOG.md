@@ -80,6 +80,10 @@ contain incompatible changes; they are listed under **Changed** or **Removed** a
   The parser now limits nesting, checks every length before it uses it, accepts only plain names as path
   components, and hashes the bytes it was given. `tests/test_engine.cpp` gained 63 checks; against the old
   code they crash the process, and 31 of the others fail.
+- **`TorrentEngine::next_piece` no longer offers pieces a peer has not claimed.** A peer's bitfield that stopped
+  short, or an empty one, was read as "has the rest": an empty bitfield answered piece 0, and one with three
+  entries answered piece 3 once pieces 0 to 2 were done. It now offers nothing past the bitfield's end. 21 new
+  checks (149 to 170); 4 of them fail on the old code. (The engine is not linked into the product yet.)
 - **The browser extension no longer loses downloads.** It cancelled every download the browser started and handed it
   to nothing: its native-messaging host answered `ok` to every message, and nobody was listening to the extension's
   own announcement. It now offers each download to the host and cancels the browser's copy only when the host

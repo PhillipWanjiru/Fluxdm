@@ -487,6 +487,56 @@ static void test_torrent_construction() {
     }
 }
 
+/* ── TorrentEngine — which piece to ask a peer for ───────────────────────── */
+static void test_piece_selection() {
+    SUITE("TorrentEngine — next_piece and a peer's bitfield");
+
+    auto bstr = [](const std::string& s) { return std::to_string(s.size()) + ":" + s; };
+    auto bint = [](int64_t v) { return "i" + std::to_string(v) + "e"; };
+
+    /* Five pieces of 100 bytes, each filled with its own letter, so that each one can be verified. */
+    std::vector<std::string> data;
+    std::string pieces;
+    for (int i = 0; i < 5; ++i) {
+        data.emplace_back(100, static_cast<char>('a' + i));
+        auto h = TorrentEngine::sha1(reinterpret_cast<const uint8_t*>(data[i].data()), data[i].size());
+        pieces.append(reinterpret_cast<const char*>(h.data()), h.size());
+    }
+    std::string info = "d" + bstr("length") + bint(500) + bstr("name") + bstr("p.bin") +
+                       bstr("piece length") + bint(100) + bstr("pieces") + bstr(pieces) + "e";
+    std::string torrent = "d" + bstr("announce") + bstr("http://t.example/a") + bstr("info") + info + "e";
+
+    TorrentEngine e;
+    EXPECT(e.load_bytes(std::vector<uint8_t>(torrent.begin(), torrent.end())));
+    EXPECT_EQ(e.pieces_total(), uint32_t(5));
+
+    auto have = [&](uint32_t i) {
+        return e.verify_piece(i, reinterpret_cast<const uint8_t*>(data[i].data()), data[i].size());
+    };
+
+    EXPECT_EQ(e.next_piece({true, true, true, true, true}), int32_t(0));       /* a peer with everything: the first we lack */
+    EXPECT_EQ(e.next_piece({false, true, false, true, false}), int32_t(1));
+    EXPECT_EQ(e.next_piece({false, false, false, false, false}), int32_t(-1)); /* a peer with nothing we need */
+    EXPECT_EQ(e.next_piece({}), int32_t(-1));                                  /* ... or one that has sent no bitfield */
+
+    /* A bitfield that stops short says nothing about the pieces past its end: they are not offered. */
+    EXPECT_EQ(e.next_piece({false, false, true}), int32_t(2));
+    EXPECT(have(2));
+    EXPECT_EQ(e.next_piece({false, false, true}), int32_t(-1));                /* it used to answer 3 */
+    EXPECT_EQ(e.next_piece({true, true}), int32_t(0));
+    EXPECT(have(0));
+    EXPECT(have(1));
+    EXPECT_EQ(e.next_piece({true, true}), int32_t(-1));                        /* it used to answer 3 */
+    EXPECT_EQ(e.next_piece({}), int32_t(-1));                                  /* it used to answer 3 */
+    EXPECT(have(3));
+    EXPECT_EQ(e.next_piece({true, true, true, true, true}), int32_t(4));
+    EXPECT(!e.verify_piece(4, reinterpret_cast<const uint8_t*>(data[3].data()), data[3].size()));  /* the wrong bytes */
+    EXPECT_EQ(e.next_piece({true, true, true, true, true}), int32_t(4));       /* ... leave it wanted */
+    EXPECT(have(4));
+    EXPECT_EQ(e.next_piece({true, true, true, true, true}), int32_t(-1));      /* nothing left to ask for */
+    EXPECT_EQ(e.pieces_missing(), uint32_t(0));
+}
+
 /* ── PeerDiscovery — compact peer parsing ────────────────────────────────── */
 static void test_peer_discovery() {
     SUITE("PeerDiscovery");
@@ -539,6 +589,7 @@ int main() {
     test_sha1();
     test_torrent_construction();
     test_untrusted_input();
+    test_piece_selection();
     test_peer_discovery();
 
     std::cout << "\n" BOLD CYAN "─────────────────────────────" RESET "\n";

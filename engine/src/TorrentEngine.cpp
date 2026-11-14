@@ -480,7 +480,7 @@ int32_t TorrentEngine::next_piece(const std::vector<bool>& available) const {
 
     for (size_t i = 0; i < info_.pieces.size(); ++i) {
         if (info_.pieces[i].downloaded) continue;
-        if (i < available.size() && !available[i]) continue;
+        if (i >= available.size() || !available[i]) continue;   /* a bitfield that stops short says nothing about the rest */
         uint32_t avail = (i < piece_availability_.size())
                          ? piece_availability_[i] : 0;
         if (avail < best_avail) {

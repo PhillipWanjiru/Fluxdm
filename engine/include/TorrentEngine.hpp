@@ -123,8 +123,11 @@ public:
 
     /* ── Piece management ──────────────────────────────────────────────────── */
 
-    /* Returns the next piece to download using "rarest first" strategy.
-     * available_pieces is a bitmask from a peer's BITFIELD message. */
+    /* The next piece to ask this peer for: one we do not have yet and the peer does. available_pieces is the
+     * peer's BITFIELD: piece i is offered only if available_pieces[i] is true, so a bitfield that is shorter
+     * than the piece count (or empty) offers nothing past its end. Returns -1 when the peer has no piece we
+     * need. The choice is "rarest first" in intent; nothing feeds piece_availability_ yet, so for now ties
+     * (all of them) go to the lowest index. */
     int32_t next_piece(const std::vector<bool>& available_pieces) const;
 
     /* Mark a piece as downloaded and verify its SHA-1. */
