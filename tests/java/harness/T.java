@@ -4,6 +4,7 @@ package harness;
 
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BooleanSupplier;
+import java.util.function.Supplier;
 
 public final class T {
     private T() {}
@@ -39,6 +40,16 @@ public final class T {
 
     public static boolean within(String desc, long timeoutMs, BooleanSupplier cond) {
         return ok(waitFor(cond, timeoutMs), desc);
+    }
+
+    /** {@link #eq} for a value that a handler on another thread is still settling. The service updates a
+     *  download's row and frees its slot one after the other under its own lock, and a test that reads the
+     *  two without that lock can land between them: "the row says DONE" does not yet mean "the slot is free".
+     *  Polls until the value is the expected one or the timeout passes, and reports the last value it saw. */
+    public static boolean settles(Object expected, Supplier<?> actual, String desc, long timeoutMs) {
+        Object[] last = new Object[1];
+        waitFor(() -> { last[0] = actual.get(); return expected == null ? last[0] == null : expected.equals(last[0]); }, timeoutMs);
+        return eq(expected, last[0], desc);
     }
 
     public static void sleep(long ms) {

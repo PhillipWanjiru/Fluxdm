@@ -776,7 +776,7 @@ public class DownloadServiceTest {
             T.ok(e.queue.isActive(a.getId()), "it holds a slot");
             e.core.emitComplete(a.getId(), 1000);
             T.within("and its completion is handled normally", 4000, () -> e.statusIs(a.getId(), STATUS_DONE));
-            T.eq(0, e.queue.activeCount(), "slot given back");
+            T.settles(0, e.queue::activeCount, "slot given back", 2000);      /* the row turns DONE a moment before the slot is freed */
         }
     }
 

@@ -480,7 +480,7 @@ public class DaemonE2ETest {
             T.ok(mon.maxAlive <= 2, "the core never ran more than 2 at once (most it ran: " + mon.maxAlive + ", " + mon.samples + " samples)");
             T.eq(2, mon.maxAlive, "...and it did run 2 together, so that check meant something");
             T.ok(origin.maxActivePaths() <= 2, "the origin never served more than 2 files at once (" + origin.maxActivePaths() + ")");
-            T.eq(0, d.queue.activeCount(), "no slot left held");
+            T.settles(0, d.queue::activeCount, "no slot left held", 3000);
             T.eq(0, d.queue.queuedCount(), "nothing left waiting");
             boolean tidy = true, sizes = true, announced = true;
             for (Download x : all) {
@@ -526,8 +526,8 @@ public class DaemonE2ETest {
             T.ok(fileIsIntact("p1.bin"), "the file is byte-for-byte what the origin served");
             long sent = origin.bytesSent("/p1.bin");
             T.ok(sent < size * 13L / 10, "it resumed instead of starting over: the origin sent " + sent + " bytes for a " + size + " byte file");
-            T.eq(List.of(STATUS_RUNNING, STATUS_PAUSED, STATUS_PENDING, STATUS_RUNNING, STATUS_DONE), history(d, id),
-                 "the UI saw running, paused, pending, running, done — in that order");
+            T.settles(List.of(STATUS_RUNNING, STATUS_PAUSED, STATUS_PENDING, STATUS_RUNNING, STATUS_DONE), () -> history(d, id),
+                      "the UI saw running, paused, pending, running, done — in that order", 3000);
         }
     }
 
@@ -652,7 +652,7 @@ public class DaemonE2ETest {
             T.ok(row.getErrorMessage() != null && row.getErrorMessage().toLowerCase().contains("checksum"),
                  "...with the core's explanation (" + row.getErrorMessage() + ")");
             T.within("the corrupt file was removed", 5000, () -> !Files.exists(file("k2.bin")));
-            T.eq(0, d.queue.activeCount(), "its slot was given back");
+            T.settles(0, d.queue::activeCount, "its slot was given back", 3000);
             T.ok(d.ui.of("error", bd.getId()).size() == 1, "the UI was told once");
         }
     }
@@ -666,7 +666,7 @@ public class DaemonE2ETest {
             Download row = d.repo.findById(n.getId()).orElseThrow();
             String msg = String.valueOf(row.getErrorMessage()).toLowerCase();
             T.ok(msg.contains("404") || msg.contains("not found"), "the error says what happened (" + row.getErrorMessage() + ")");
-            T.eq(0, d.queue.activeCount(), "the slot was given back");
+            T.settles(0, d.queue::activeCount, "the slot was given back", 3000);
             T.ok(!Files.exists(file("missing.bin")), "no file was created");
 
             byte[] data = randomBytes(601, 600 * KiB);
@@ -743,7 +743,7 @@ public class DaemonE2ETest {
                  "they resumed from their checkpoints: the origin sent " + s1 + " and " + s2 + " bytes for " + size + " byte files");
             T.ok(!history(d, x1.getId()).contains(STATUS_ERROR) && !history(d, x2.getId()).contains(STATUS_ERROR) && !history(d, x3.getId()).contains(STATUS_ERROR),
                  "no download was ever reported failed");
-            T.eq(0, d.queue.activeCount(), "no slot left held");
+            T.settles(0, d.queue::activeCount, "no slot left held", 3000);
             T.eq(0, d.queue.queuedCount(), "nothing left waiting");
             T.eq(1L, origin.probes("/x3.bin"), "the waiting one was probed once: it started once, after a slot freed up");
         }
@@ -802,7 +802,7 @@ public class DaemonE2ETest {
             boolean clean = true;
             for (Download x : all) clean &= !history(second, x.getId()).contains(STATUS_ERROR);
             T.ok(clean, "daemon #2 never reported a failure");
-            T.eq(0, second.queue.activeCount(), "no slot left held");
+            T.settles(0, second.queue::activeCount, "no slot left held", 3000);
 
             AckResult bye = second.ipc.shutdownCore().get(5, TimeUnit.SECONDS);
             T.ok(bye.ok(), "the adopted core can still be told to shut down on request");
