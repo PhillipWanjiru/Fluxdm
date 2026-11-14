@@ -17,8 +17,28 @@
  *  URLs
  * ═══════════════════════════════════════════════════════════════════════════ */
 
+size_t http_url_redact(const char *url, char *out, size_t out_len) {
+    if (out_len == 0) return 0;
+    const char *sep  = strstr(url, "://");
+    const char *auth = sep ? sep + 3 : url;                  /* no scheme: "user:pw@host/x", or "//user:pw@host/x" */
+    if (!sep && auth[0] == '/' && auth[1] == '/') auth += 2;
+    const char *auth_end = auth + strcspn(auth, "/?#");
+    const char *at       = NULL;
+    for (const char *c = auth; c < auth_end; c++) if (*c == '@') at = c;
+    if (at) {
+        snprintf(out, out_len, "%.*s%s", (int)(auth - url), url, at + 1);
+        return strlen(out);
+    }
+    snprintf(out, out_len, "%s", url);
+    return strlen(out);
+}
+
+/* The message goes back to the client, and from there into logs and screens: it names the URL, but not the
+ * password in it. */
 static int url_err(const char *what, const char *url) {
-    flux_set_error(FLUX_ERR_HTTP_PARSE, "%s: %.200s", what, url ? url : "(null)");
+    char shown[FLUX_MAX_URL];
+    http_url_redact(url ? url : "(null)", shown, sizeof(shown));
+    flux_set_error(FLUX_ERR_HTTP_PARSE, "%s: %.200s", what, shown);
     return -1;
 }
 

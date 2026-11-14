@@ -2,6 +2,7 @@
 
 #include "../include/resume.h"
 #include "../include/errors.h"
+#include "../include/protocol/http.h"
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
@@ -12,23 +13,6 @@
 
 void flux_resume_path(const char *file_path, char *out, size_t out_len) {
     snprintf(out, out_len, "%s.fluxpart", file_path);
-}
-
-size_t flux_resume_redact_url(const char *url, char *out, size_t out_len) {
-    if (out_len == 0) return 0;
-    const char *sep = strstr(url, "://");
-    if (sep) {
-        const char *auth     = sep + 3;
-        const char *auth_end = auth + strcspn(auth, "/?#");
-        const char *at       = NULL;
-        for (const char *c = auth; c < auth_end; c++) if (*c == '@') at = c;
-        if (at) {
-            snprintf(out, out_len, "%.*s%s", (int)(auth - url), url, at + 1);
-            return strlen(out);
-        }
-    }
-    snprintf(out, out_len, "%s", url);
-    return strlen(out);
 }
 
 int flux_resume_save(const flux_resume_t *r, const char *part_path) {
@@ -67,7 +51,7 @@ int flux_resume_save(const flux_resume_t *r, const char *part_path) {
 
     /* URL (uint16_t len + data) */
     char url[FLUX_RESUME_MAX_URL];
-    flux_resume_redact_url(r->url, url, sizeof(url));
+    http_url_redact(r->url, url, sizeof(url));
     uint16_t url_len  = (uint16_t)strnlen(url,     FLUX_RESUME_MAX_URL - 1);
     uint16_t path_len = (uint16_t)strnlen(r->path, FLUX_RESUME_MAX_URL - 1);
 

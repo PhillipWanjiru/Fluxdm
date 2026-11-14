@@ -326,6 +326,15 @@ def test_basic_auth():
     log = CORE.log_text()
     expect("p%40ss" not in log and "p@ss" not in log and "w0rd" not in log,
            "the password never reaches the core's log")
+
+    # A URL the core refuses is named in the error it sends back, which the daemon logs and the UI shows: not with
+    # the password in it.
+    for bad in ("http://alice:hunter2@/x", "http://alice:hunter2@host:abc/x", "ftp://alice:hunter2@host/x",
+                "http://alice:hunter2@[::1/x"):
+        typ, pl = c.start(nid(), bad, outpath(), segments=1)
+        text = pl.decode("latin-1") if isinstance(pl, (bytes, bytearray)) else str(pl)
+        expect(typ == RSP_ERROR and "/x" in text, f"{bad.split('@')[1]}: refused, and the error names the URL", (typ, text[:120]))
+        expect("hunter2" not in text and "alice" not in text, f"{bad.split('@')[1]}: ...without the user name or password", text[:120])
     c.close()
     site.stop()
 

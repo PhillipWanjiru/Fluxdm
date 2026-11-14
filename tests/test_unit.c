@@ -329,9 +329,9 @@ static void test_resume(void) {
     EXPECT_STR(ppath, "/downloads/video.mp4.fluxpart");
 }
 
-/* ── Suite 5b: a URL without its password ───────────────────────────────── */
-static void test_resume_redact_url(void) {
-    SUITE("resume.c — a URL without its user name and password");
+/* ── Suite 5b: a URL without its password (http.c) ──────────────────────── */
+static void test_http_url_redact(void) {
+    SUITE("http.c — a URL without its user name and password");
 
     static const struct { const char *in, *out; } cases[] = {
         { "http://example.com/f.bin",                "http://example.com/f.bin" },
@@ -347,25 +347,69 @@ static void test_resume_redact_url(void) {
         { "http://host/f?mail=a@b",                  "http://host/f?mail=a@b" },
         { "http://host?mail=a@b",                    "http://host?mail=a@b" },
         { "http://host#a@b",                         "http://host#a@b" },
-        { "not a url@x",                             "not a url@x" },
+        { "alice:hunter2@host/x",                    "host/x" },                   /* no scheme at all */
+        { "//alice:hunter2@host/x",                  "//host/x" },                 /* scheme-relative */
+        { "/dir@name/f?a=b@c",                       "/dir@name/f?a=b@c" },        /* a path, not an authority */
+        { "host/dir@name",                           "host/dir@name" },
         { "",                                        "" },
     };
     for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
         char out[256], again[256];
-        size_t n = flux_resume_redact_url(cases[i].in, out, sizeof(out));
+        size_t n = http_url_redact(cases[i].in, out, sizeof(out));
         EXPECT_STR(out, cases[i].out);
-        flux_resume_redact_url(out, again, sizeof(again));
+        http_url_redact(out, again, sizeof(again));
         EXPECT(n == strlen(cases[i].out) && strcmp(again, out) == 0);              /* length, and doing it twice */
     }
 
     char small[8];
-    size_t n = flux_resume_redact_url("http://user:pw@example.com/long/path", small, sizeof(small));
+    size_t n = http_url_redact("http://user:pw@example.com/long/path", small, sizeof(small));
     EXPECT_EQ(n, 7);
     EXPECT_STR(small, "http://");                                                  /* cut short, and still a string */
 
     char guard[4] = { 'x', 'x', 'x', 'x' };
-    EXPECT_EQ(flux_resume_redact_url("http://a@b/", guard, 0), 0);
+    EXPECT_EQ(http_url_redact("http://a@b/", guard, 0), 0);
     EXPECT(guard[0] == 'x');                                                       /* no room: nothing written */
+
+    /* An error about a URL names the URL, but not the password in it: the message goes back to the client, and from
+     * there into logs and onto screens. */
+    static const char *const broken[] = {
+        "http://alice:hunter2@/x",              /* no host                  */
+        "http://alice:hunter2@:99999/x",
+        "http://alice:hunter2@host:abc/x",      /* non-numeric port         */
+        "http://alice:hunter2@host:0/x",        /* port out of range        */
+        "http://alice:hunter2@[::1/x",          /* unterminated IPv6        */
+        "ftp://alice:hunter2@host/x",           /* unsupported scheme       */
+        "alice:hunter2@host/x",                 /* no scheme                */
+    };
+    for (size_t i = 0; i < sizeof(broken) / sizeof(broken[0]); i++) {
+        http_url_t u;
+        EXPECT_EQ(http_url_parse(broken[i], &u), -1);
+        const char *msg = flux_last_error_str();
+        EXPECT(strstr(msg, "hunter2") == NULL && strstr(msg, "alice") == NULL);
+        EXPECT(strstr(msg, "/x") != NULL);                                         /* and still says which URL */
+    }
+    {
+        char longurl[FLUX_MAX_URL + 400];                                          /* too long, and the password first */
+        snprintf(longurl, sizeof(longurl), "http://alice:hunter2@host/");
+        memset(longurl + strlen(longurl), 'a', FLUX_MAX_URL + 300);
+        longurl[strlen("http://alice:hunter2@host/") + FLUX_MAX_URL + 300] = '\0';
+        http_url_t u;
+        EXPECT_EQ(http_url_parse(longurl, &u), -1);
+        EXPECT(strstr(flux_last_error_str(), "hunter2") == NULL);
+
+        char longuser[600];                                                        /* credentials too long to keep */
+        snprintf(longuser, sizeof(longuser), "http://");
+        memset(longuser + 7, 'u', 400);
+        snprintf(longuser + 407, sizeof(longuser) - 407, ":hunter2@host/x");
+        EXPECT_EQ(http_url_parse(longuser, &u), -1);
+        EXPECT(strstr(flux_last_error_str(), "hunter2") == NULL && strstr(flux_last_error_str(), "uuuu") == NULL);
+    }
+    {
+        http_url_t base, next;                                                     /* a redirect with credentials */
+        EXPECT_EQ(http_url_parse("http://example.com/a", &base), 0);
+        EXPECT_EQ(http_url_resolve(&base, "ftp://alice:hunter2@other.example/x", &next), -1);
+        EXPECT(strstr(flux_last_error_str(), "hunter2") == NULL && strstr(flux_last_error_str(), "alice") == NULL);
+    }
 }
 
 /* ── Suite 5c: the resume file as a target ───────────────────────────────── */
@@ -1136,7 +1180,7 @@ int main(void) {
     test_bandwidth();
     test_checksum();
     test_resume();
-    test_resume_redact_url();
+    test_http_url_redact();
     test_resume_files();
     test_http_url_parse();
     test_http_headers();

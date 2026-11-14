@@ -62,20 +62,13 @@ typedef struct {
  *
  * The file is created mode 0600 and is never opened through a link: it sits next to the download, in a folder other
  * accounts may be able to read or write, and it names the URL. The URL is written without its "user:password@" part
- * (see flux_resume_redact_url), so a password never reaches the disk through here. */
+ * (see http_url_redact), so a password never reaches the disk through here. */
 int  flux_resume_save(const flux_resume_t *r, const char *part_path);
 
 /* Load and validate an existing .fluxpart file.
  * Returns 0 on success, -1 if missing/corrupt (start fresh). A link, a FIFO, a device or a directory in its place
  * is treated as corrupt, and is never followed or waited on. */
 int  flux_resume_load(flux_resume_t *r, const char *part_path);
-
-/* `url` without the user name and password of its authority ("http://u:p@host/f" -> "http://host/f"). The user
- * information is what precedes the LAST '@' of the authority, the rule the URL parser uses. Copies at most
- * out_len-1 bytes, always ends the output with NUL (when out_len > 0) and returns its length. Resume files hold
- * URLs in this form, and a stored URL is compared with the current one in this form, so a file written by an older
- * version, which kept the password, still matches. */
-size_t flux_resume_redact_url(const char *url, char *out, size_t out_len);
 
 /* Delete the .fluxpart file after a successful completed download. */
 void flux_resume_delete(const char *part_path);

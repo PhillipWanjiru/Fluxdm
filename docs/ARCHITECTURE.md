@@ -218,7 +218,9 @@ kept and can be resumed.
 - A response that does not match the request is refused rather than written into the file: a `206`
   whose `Content-Range` starts elsewhere, a plain `200` to a ranged request, or a total size that
   differs from the probe's all end the segment with a `RANGE` error.
-- Log lines never contain URL credentials or query strings: signed URLs carry their secrets there.
+- Log lines never contain URL credentials or query strings: signed URLs carry their secrets there. Error
+  messages about a URL (which the daemon logs and the UI shows) name it without its `user:password@`
+  part (`http_url_redact`).
 
 ### 2.5 Resume
 
@@ -236,7 +238,7 @@ Per-download state lives next to the output file in `<file>.fluxpart`:
   `0600` (whatever the umask), and the temporary file is created with `O_EXCL | O_NOFOLLOW` after any
   leftover of a crash was removed: a link planted at that name is not followed, and what it points to is
   not overwritten. Loading refuses a link, a FIFO, a device or a folder in its place without waiting on it.
-- **No password.** The URL is stored without its `user:password@` part (`flux_resume_redact_url`), and a
+- **No password.** The URL is stored without its `user:password@` part (`http_url_redact`), and a
   stored URL is compared with the current one in that form, so a file written before this change, which
   kept the password, still matches, and so does a resume after the password was corrected.
 - **Validator.** An FNV-1a hash of `Last-Modified` (else a strong `ETag`), mixed with the file size.

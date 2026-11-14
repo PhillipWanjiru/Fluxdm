@@ -67,6 +67,9 @@ time to fix the problem before you disclose it.
   never opened through a link (a link planted at its temporary name in a shared folder does not make the
   core overwrite the file it points to), is refused when it is a FIFO or a folder, and keeps the URL
   without its `user:password@` part.
+- **Passwords in URLs stay out of the core's messages.** The core's log never had them, and its error
+  replies, which the daemon logs and the UI shows, name a refused URL without its `user:password@` part.
+  (The daemon's database does keep the URL as it was given, in the `~/.fluxdm` folder only you can enter.)
 - **A file that fails checksum verification is deleted**, not left at its final name.
 - **Credentials go only where they were meant to.** Basic-authentication credentials in a URL are
   sent to that URL's origin and are not carried over a redirect to another host, another port or a

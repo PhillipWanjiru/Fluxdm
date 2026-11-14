@@ -72,6 +72,14 @@ typedef struct {
  * Returns 0 on success, -1 with FLUX_ERR_HTTP_PARSE otherwise. */
 int  http_url_parse(const char *url, http_url_t *out);
 
+/* `url` without the user name and password of its authority ("http://u:p@host/f" -> "http://host/f"). The user
+ * information is whatever precedes the LAST '@' of the authority, the rule http_url_parse uses; without a "://",
+ * the authority is the text up to the first '/', '?' or '#' (after a leading "//"), so a broken URL that has no
+ * scheme loses its password too. Copies at most out_len-1 bytes, always ends the output with NUL (when
+ * out_len > 0) and returns its length. Everything that
+ * writes a URL where somebody else can read it (a resume file, an error message) goes through this. */
+size_t http_url_redact(const char *url, char *out, size_t out_len);
+
 /* Resolve a Location header value (absolute, scheme-relative, absolute-path
  * or relative) against the URL it came from. Credentials embedded in `base`
  * are only inherited when the redirect stays on the same host. */

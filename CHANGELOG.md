@@ -118,6 +118,12 @@ contain incompatible changes; they are listed under **Changed** or **Removed** a
   without its `user:password@` part (a file from an older version, which has it, still matches). The unit suite
   grew from 272 to 343 checks, 25 of which fail on the old code and one of which hangs it; the behaviour suite
   checks the mode and the password across a real restart.
+- **Error messages about a URL no longer repeat its password.** When the core refused a URL (no host, a bad port, an
+  unsupported scheme, a redirect to one), its error named the URL in full, `user:password@` included, and the
+  daemon logged that at WARN and kept it in the download's error message. Confirmed against the real core with
+  `http://alice:hunter2@/x`. The messages now name the URL without its user information, through one helper,
+  `http_url_redact`, which the resume file shares (it moved here from `resume.c`). The unit suite grew from 343
+  to 377 checks, and the behaviour suite has eight new ones, four of which fail on the old core.
 - **The `Host` check compares exactly what was sent.** Unicode spaces around a `Host` value were removed, and the
   Kelvin sign (U+212A) was read as a `k`, before the value was looked up. A real request is unlikely to carry
   such characters, and no way to use this was found, but only printable ASCII with spaces or tabs around it is

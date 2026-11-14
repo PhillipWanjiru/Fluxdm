@@ -888,11 +888,11 @@ static int resume_matches(const flux_download_t *dl, const flux_resume_t *r, con
     int validators = r->hdr.validator != 0 && dl->validator != 0;
     if (validators && r->hdr.validator != dl->validator) { *why = "the file changed on the server"; return 0; }
 
-    /* The stored URL has no user name or password (flux_resume_redact_url), and a file written by an older version
+    /* The stored URL has no user name or password (http_url_redact), and a file written by an older version
      * still has: compare both in the same form. */
     char then[FLUX_RESUME_MAX_URL], now[FLUX_MAX_URL];
-    flux_resume_redact_url(r->url,  then, sizeof(then));
-    flux_resume_redact_url(dl->url, now,  sizeof(now));
+    http_url_redact(r->url,  then, sizeof(then));
+    http_url_redact(dl->url, now,  sizeof(now));
     if (strcmp(then, now) != 0) {
         /* A refreshed signed URL differs only in its query: accept that, but only
          * when the validators vouch for it. Anything else is another file. */
