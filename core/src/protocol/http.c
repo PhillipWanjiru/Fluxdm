@@ -22,7 +22,8 @@ size_t http_url_redact(const char *url, char *out, size_t out_len) {
     const char *sep  = strstr(url, "://");
     const char *auth = sep ? sep + 3 : url;                  /* no scheme: "user:pw@host/x", or "//user:pw@host/x" */
     if (!sep && auth[0] == '/' && auth[1] == '/') auth += 2;
-    const char *auth_end = auth + strcspn(auth, "/?#");
+    const char *auth_end = auth;
+    while (*auth_end && *auth_end != '/' && *auth_end != '?' && *auth_end != '#') auth_end++;
     const char *at       = NULL;
     for (const char *c = auth; c < auth_end; c++) if (*c == '@') at = c;
     if (at) {
