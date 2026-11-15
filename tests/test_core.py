@@ -447,6 +447,39 @@ def test_retry_policies():
     c.close()
 
 
+def test_retry_budget():
+    info("Retries: only progress refills the budget; a stream that never gets further ends in an error")
+    c = CORE.connect()
+
+    # A resumable server that cuts the stream every 256 KiB. Each retry carries on after the bytes already
+    # written, so each one is progress, and the download is followed through more cuts than the budget allows.
+    size = 12 * 262_144 + 12_345
+    mkfile("cut.bin", size)
+    site = Site(SRV)
+    site.set("/cut.bin", reset_after=262_144, reset_times=10 ** 6, chunk=16384)
+    dl, res, dest = fetch(c, site, "/cut.bin", segments=1, timeout=120)
+    verify("a resumable stream cut every 256 KiB is followed to the end", c, dl, res, dest, "cut.bin")
+    cuts = [r for r in site.requests("/cut.bin") if "reset" in str(r[3])]
+    expect(len(cuts) >= 9, f"...through more cuts than the 8 retries a segment gets (saw {len(cuts)})")
+    site.stop()
+
+    # A server that cannot resume and always cuts the stream at the same byte. Every attempt starts again from
+    # zero and gets exactly as far as the one before, so none of them is progress and the budget runs out. (The
+    # core used to count each attempt's 200 kB as progress: it reconnected every half second for ever.)
+    mkfile("stuck.bin", 2 << 20)
+    site = Site(SRV)
+    site.set("/stuck.bin", ranges=False, reset_after=200_000, reset_times=10 ** 6, chunk=16384)
+    dl, res, dest = fetch(c, site, "/stuck.bin", segments=4, timeout=100)
+    msg = res[1]["msg"] if res and res[0] == "error" else ""
+    expect(res is not None and res[0] == "error", "a stream that always breaks at the same byte ends in an error", res)
+    expect("gave up after 8 retries" in msg, f"...which says that it gave up ({msg!r})")
+    gets = len(site.requests("/stuck.bin", "GET"))
+    expect(9 <= gets <= 12, f"...after the first try and 8 retries, not after more ({gets} requests)")
+    expect(c.cancel(dl) is True, "...and CANCEL clears it")
+    site.stop()
+    c.close()
+
+
 # ═══ Servers that push back ═══════════════════════════════════════════════════
 def _refusals(site, path):
     return [r for r in site.requests(path, "GET") if r[3] in (429, 503)]
@@ -1536,7 +1569,7 @@ def test_throughput():
 # ═══ Main ═════════════════════════════════════════════════════════════════════
 TESTS = [
     test_identity, test_sizes_and_segments, test_empty_file, test_server_flavours, test_url_forms, test_redirects,
-    test_basic_auth, test_checksums, test_failure_paths, test_retry_policies, test_rate_limits,
+    test_basic_auth, test_checksums, test_failure_paths, test_retry_policies, test_retry_budget, test_rate_limits,
     test_rate_limit_patience, test_rate_limit_queue, test_disk_errors,
     test_pause_resume, test_pause_resume_storm, test_cancel_cleanup, test_interruptible_probe,
     test_bandwidth_limits, test_duplicates_and_ids, test_resume_after_shutdown, test_resume_after_sigterm,

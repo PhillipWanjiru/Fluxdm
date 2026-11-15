@@ -219,6 +219,22 @@ static int seg_abandon_attempt(flux_segment_t *seg) {
     return disk_error;
 }
 
+/* An attempt has ended: did it get anywhere? Earlier failures are forgiven (the retry budget is refilled) only
+ * by progress that is new: SEG_RETRY_RESET_BYTES beyond the furthest any attempt reached. Measuring against the
+ * end of the last attempt would not do. A server that cannot resume sends the same bytes again from the start,
+ * so every attempt would look like progress, and a stream that always breaks at the same place would be forgiven
+ * every time and retried for ever, re-downloading the same bytes. For a server that can resume the two measures
+ * are the same: a retry carries on after the bytes it has, so `received` only grows. */
+static void seg_note_progress(flux_segment_t *seg) {
+    uint64_t got = flux_seg_received(seg);
+
+    if (got >= seg->progress_mark + SEG_RETRY_RESET_BYTES) {
+        seg->retries = 0;
+        seg_clear_refusals(seg);
+    }
+    if (got > seg->progress_mark) seg->progress_mark = got;
+}
+
 /* Record a failure. The cause must already be in the thread-local error store
  * (flux_set_error). `fatal` ends the segment; otherwise it backs off and is
  * restarted by flux_seg_tick() — from the byte after the last one received.
@@ -229,12 +245,7 @@ static void seg_fail(flux_segment_t *seg, int fatal, uint32_t delay_ms) {
     if (seg_abandon_attempt(seg)) fatal = 1;
 
     if (!fatal) {
-        uint64_t got = flux_seg_received(seg);
-        if (got >= seg->progress_mark + SEG_RETRY_RESET_BYTES) {   /* made real progress */
-            seg->retries = 0;
-            seg_clear_refusals(seg);
-        }
-        seg->progress_mark = got;
+        seg_note_progress(seg);
 
         if (seg->retries >= seg->max_retries) {
             fatal = 1;
@@ -300,12 +311,7 @@ static void seg_refused(flux_segment_t *seg, uint32_t retry_after_ms) {
     uint32_t delay    = 0;
 
     if (!fatal) {
-        uint64_t got = flux_seg_received(seg);
-        if (got >= seg->progress_mark + SEG_RETRY_RESET_BYTES) {          /* made real progress since */
-            seg->retries = 0;
-            seg_clear_refusals(seg);
-        }
-        seg->progress_mark = got;
+        seg_note_progress(seg);
 
         if (seg->refused_since_ms == 0) seg->refused_since_ms = now;
         waited = flux_gate_waited_ms(seg->dl->target.host, seg->dl->target.port, seg->refused_since_ms, now);
@@ -358,13 +364,14 @@ static void seg_finish(flux_segment_t *seg) {
 
 /* A server that cannot serve ranges can only ever stream from byte 0. If such
  * a stream breaks, everything received so far is useless as a prefix of the
- * next attempt — it gets overwritten — so forget it. */
+ * next attempt — it gets overwritten — so forget it. The furthest point reached
+ * is not forgotten (progress_mark): the next attempt has to get past it to count
+ * as progress. */
 static void seg_restart_from_zero(flux_segment_t *seg) {
     int64_t got = (int64_t)flux_seg_received(seg);
     if (got > 0) flux_dl_add_progress(seg->dl, -got);
     seg->written  = 0;
     seg->wbuf_len = 0;
-    seg->progress_mark = 0;
 }
 
 int flux_seg_start(flux_segment_t *seg, int epoll_fd) {

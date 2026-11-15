@@ -69,7 +69,7 @@ and that progress frames never go backwards or past the total.
 | **Transfers** | File sizes against segment counts; empty files; keep-alive, chunked, unknown-length and no-`Range` servers; URL forms; redirect chains and loops; Basic authentication |
 | **Integrity** | Matching and mismatching MD5 / SHA-256 (a mismatch deletes the file and discards the resume state) |
 | **Failure paths** | Malformed and unsupported URLs; connection refused; DNS failure; a server that drops every request; 403, 404, 500 with retries; and the original crash: a failing `START` among running downloads |
-| **Retries** | Resets mid-body, truncated bodies, back-off and the retry budget |
+| **Retries** | Resets mid-body, truncated bodies, back-off and the retry budget: a resumable stream cut more often than the budget allows is followed to the end, and a stream that cannot resume and always breaks at the same byte ends in an error after 8 retries (about a minute) |
 | **Rate limiting** | `429` / `503` from connection caps and scripted refusals; `Retry-After`; the host gate's learned allowance; the patience clock (silence versus queueing); the `--patience` switch; probes refused repeatedly; log output reduced to one complaint and one settled line; downloads sharing a host; servers that ignore `Range`. See [RATE_LIMITING.md](RATE_LIMITING.md). |
 | **Disk errors** | Destination under a regular file or under `/proc`; write failures from a file-size limit; the core survives them |
 | **Control** | Pause, resume (also while probing), a storm of pause / resume, cancel cleanup, an interruptible probe, bandwidth limits, duplicate and reserved ids |

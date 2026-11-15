@@ -72,11 +72,12 @@ typedef struct flux_segment {
     int          file_fd;
 
     /* Retry control */
-    uint8_t      retries;       /* consecutive failures without progress */
+    uint8_t      retries;       /* consecutive failures without new progress */
     uint8_t      max_retries;
     uint32_t     retry_delay_ms;
     uint64_t     retry_at_ms;   /* when state == SEG_RETRYING           */
-    uint64_t     progress_mark; /* `received` when retries was last reset */
+    uint64_t     progress_mark; /* the furthest `received` has been when an attempt ended; failures are forgiven
+                                 * only by an attempt that gets well past it (seg_note_progress) */
 
     /* Server pushback (HTTP 429 / 503). Not a fault of the connection, so it does
      * not spend `retries`: the segment keeps asking, politely, within a time

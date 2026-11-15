@@ -197,7 +197,10 @@ yields, so one fast connection cannot starve its siblings. A connection that del
 with exponential back-off from `SEG_BACKOFF_BASE_MS` (500 ms) up to `SEG_BACKOFF_MAX_MS` (15 s) with
 jitter derived from the segment index, so siblings do not come back in lockstep, and a longer
 `Retry-After` wins over the computed delay. A segment gives up after `SEG_MAX_RETRIES` (8) failures
-*without progress*: receiving `SEG_RETRY_RESET_BYTES` (16 KiB) forgives the earlier failures.
+*without progress*: an attempt that gets `SEG_RETRY_RESET_BYTES` (16 KiB) beyond the furthest point any
+attempt reached forgives the earlier failures. (A server that cannot resume starts every attempt again at
+byte 0, so for it that means getting further than any attempt before; measured against the last attempt, a
+stream that always breaks at the same byte would be forgiven every time and retried for ever.)
 Certificate errors and responses that cannot be right (a non-retryable `4xx`, the wrong byte range,
 a size that differs from the probe's) are fatal at once. A `429` / `503` is not a fault of the
 connection and does not spend a retry; the host gate handles it with its own time budget. A redirect

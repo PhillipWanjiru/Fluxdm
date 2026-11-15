@@ -69,6 +69,16 @@ contain incompatible changes; they are listed under **Changed** or **Removed** a
 
 ### Fixed
 
+- **A download from a server that cannot resume no longer retries for ever.** Such a server can only stream from
+  the first byte, so when it breaks the stream the core starts again from zero. It counted every attempt that got
+  16 KiB in as progress and refilled the segment's eight retries each time, so a server that always cut the stream
+  at the same place kept the download reconnecting every half second, fetching the same bytes again, and the
+  download never failed. Progress now has to get past the furthest point any attempt reached; a download that
+  does not get further fails after eight retries, like any other. A server that can resume is not affected: each
+  retry carries on after the bytes already written. Found by fuzzing with hostile servers. Against a local
+  server that cuts the stream at 200,000 bytes, the old core made 220 requests in 100 s and was still going; the
+  new one gives up after 9 requests, in about a minute. The behaviour suite gained 6 checks, 3 of which fail on
+  the old core.
 - **The C++ engine's parsers no longer trust the files they read** (the engine is not linked into the product
   yet, so nothing shipped was affected). Fuzzing and Valgrind found: a `.torrent` nested 100,000 levels deep
   overflowed the stack, as did a `Content-Disposition` file name of 30 KB or more (`std::regex` recursion; the
