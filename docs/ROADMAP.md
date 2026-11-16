@@ -113,6 +113,11 @@ In rough order. Each item says what it depends on, so the order is not arbitrary
 
 ## Before 1.0: the audit
 
+The first pass, phase by phase, is done: [AUDIT.md](AUDIT.md) says where each phase stands and what is left in it,
+lists what was found and fixed, plans the harden, refactor and optimise pass that follows the last phase, and keeps
+a register of every open item with an ID, a class and a size. The candidates below are in that register or in the
+pass it plans. What follows is the standing description of the pass.
+
 Before a 1.0 release the whole project gets one pass, from the first phase (the C core) outward through the
 engine layer, the daemon, the extension and the UI. The goal is industry-grade code that
 installs and runs reliably on a machine that is not the author's:
@@ -132,10 +137,11 @@ Candidates found so far: a list to start from, not the audit.
   tests call: `getOne` and `setLimit` in `api/downloads.js`, `getStats` in `api/stats.js`.
 - One shared modal with a focus trap and focus return; the three dialogs repeat their overlay code and none
   returns focus to what opened it.
-- Electron 29 is no longer supported upstream: move to a supported major, then re-run the shell's tests and a
-  real-Electron smoke test. `react-scripts` is unmaintained (its build tooling carries 15 high-severity advisories,
-  none of them in the shipped app: `npm audit --omit=dev` reports none): move to Vite. recharts 2 is deprecated:
-  move to 3.
+- Electron 29 is no longer supported upstream, and the packaged app carries it (it is a development dependency, so
+  `npm audit --omit=dev` does not show it; plain `npm audit` lists 45 advisories against 29.4.6): move to a
+  supported major, then re-run the shell's tests and a real-Electron smoke test. `react-scripts` is unmaintained
+  and carries 35 of the 37 packages `npm audit` flags (15 high among the 37); they are build and test tools that
+  the packaged app does not contain: move to Vite. recharts 2 is deprecated: move to 3.
 - Install scripts: of the 1,423 packages in the lockfile, four declare them: `electron` (it downloads its
   binary), `core-js` and `core-js-pure` (they print a funding notice) and `fsevents` (macOS only). Only
   Electron's is needed. When the npm in use can restrict install scripts to an allow-list, adopt it, so that a

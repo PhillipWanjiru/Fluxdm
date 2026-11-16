@@ -34,6 +34,10 @@ contain incompatible changes; they are listed under **Changed** or **Removed** a
   against a stand-in for Electron). 405 Jest tests and 50 shell tests; the CI `ui` job runs both, with the
   production build. `tests/mutation_electron.py` breaks the shell's rules one at a time and checks that a test
   notices (72 changes; not part of CI).
+- **An audit of every phase** ([docs/AUDIT.md](docs/AUDIT.md)): for each phase, what the plan asked for, what
+  exists, how it was checked, what was fixed and what is left; the plan for the hardening, refactoring and
+  optimisation pass that follows the last phase; seven decisions for the maintainer; and a register of 48 open
+  items, each with a class and a size. The defects the audit fixed are listed under **Fixed**.
 
 ### Changed
 
